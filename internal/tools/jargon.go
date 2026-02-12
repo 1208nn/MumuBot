@@ -46,7 +46,9 @@ func saveJargonFunc(ctx context.Context, input *SaveJargonInput) (*SaveJargonOut
 	}
 
 	if err := lc.MemMgr.SaveJargon(jargon); err != nil {
-		return &SaveJargonOutput{Success: false, Message: err.Error()}, nil
+		output := &SaveJargonOutput{Success: false, Message: err.Error()}
+		LogToolCall("saveJargon", input, output, err)
+		return output, nil
 	}
 
 	// 实时更新 AC 自动机
@@ -54,7 +56,9 @@ func saveJargonFunc(ctx context.Context, input *SaveJargonInput) (*SaveJargonOut
 		lc.JargonMgr.AddJargon(input.Content, input.Meaning)
 	}
 
-	return &SaveJargonOutput{Success: true, Message: "已记住这个黑话"}, nil
+	output := &SaveJargonOutput{Success: true, Message: "已记住这个黑话"}
+	LogToolCall("saveJargon", input, output, nil)
+	return output, nil
 }
 
 // NewSaveJargonTool 创建保存黑话工具
@@ -168,7 +172,9 @@ func getUnverifiedJargonsFunc(ctx context.Context, input *GetUnverifiedJargonsIn
 
 	jargons, err := lc.MemMgr.GetUnverifiedJargons(lc.GroupID, limit)
 	if err != nil {
-		return &GetUnverifiedJargonsOutput{Success: false, Message: err.Error()}, nil
+		output := &GetUnverifiedJargonsOutput{Success: false, Message: err.Error()}
+		LogToolCall("getUnverifiedJargons", input, output, err)
+		return output, nil
 	}
 
 	results := make([]UnverifiedJargonItem, 0, len(jargons))
@@ -181,7 +187,9 @@ func getUnverifiedJargonsFunc(ctx context.Context, input *GetUnverifiedJargonsIn
 		})
 	}
 
-	return &GetUnverifiedJargonsOutput{Success: true, Jargons: results}, nil
+	output := &GetUnverifiedJargonsOutput{Success: true, Jargons: results}
+	LogToolCall("getUnverifiedJargons", input, output, nil)
+	return output, nil
 }
 
 func NewGetUnverifiedJargonsTool() (tool.InvokableTool, error) {
@@ -216,14 +224,18 @@ func reviewJargonFunc(ctx context.Context, input *ReviewJargonInput) (*ReviewJar
 
 	err := lc.MemMgr.ReviewJargon(input.ID, input.Approve)
 	if err != nil {
-		return &ReviewJargonOutput{Success: false, Message: err.Error()}, nil
+		output := &ReviewJargonOutput{Success: false, Message: err.Error()}
+		LogToolCall("reviewJargon", input, output, err)
+		return output, nil
 	}
 
 	msg := "已拒绝该黑话"
 	if input.Approve {
 		msg = "已验证该黑话"
 	}
-	return &ReviewJargonOutput{Success: true, Message: msg}, nil
+	output := &ReviewJargonOutput{Success: true, Message: msg}
+	LogToolCall("reviewJargon", input, output, nil)
+	return output, nil
 }
 
 func NewReviewJargonTool() (tool.InvokableTool, error) {

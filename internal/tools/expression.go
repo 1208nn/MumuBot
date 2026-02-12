@@ -41,7 +41,9 @@ func getUncheckedExpressionsFunc(ctx context.Context, input *GetUncheckedExpress
 
 	exps, err := lc.MemMgr.GetUncheckedExpressions(lc.GroupID, limit)
 	if err != nil {
-		return &GetUncheckedExpressionsOutput{Success: false, Message: err.Error()}, nil
+		output := &GetUncheckedExpressionsOutput{Success: false, Message: err.Error()}
+		LogToolCall("getUncheckedExpressions", input, output, err)
+		return output, nil
 	}
 
 	results := make([]UncheckedExpressionItem, 0, len(exps))
@@ -54,7 +56,9 @@ func getUncheckedExpressionsFunc(ctx context.Context, input *GetUncheckedExpress
 		})
 	}
 
-	return &GetUncheckedExpressionsOutput{Success: true, Expressions: results}, nil
+	output := &GetUncheckedExpressionsOutput{Success: true, Expressions: results}
+	LogToolCall("getUncheckedExpressions", input, output, nil)
+	return output, nil
 }
 
 func NewGetUncheckedExpressionsTool() (tool.InvokableTool, error) {
@@ -89,14 +93,18 @@ func reviewExpressionFunc(ctx context.Context, input *ReviewExpressionInput) (*R
 
 	err := lc.MemMgr.ReviewExpression(input.ID, input.Approve)
 	if err != nil {
-		return &ReviewExpressionOutput{Success: false, Message: err.Error()}, nil
+		output := &ReviewExpressionOutput{Success: false, Message: err.Error()}
+		LogToolCall("reviewExpression", input, output, err)
+		return output, nil
 	}
 
 	msg := "已拒绝该表达方式"
 	if input.Approve {
 		msg = "已通过该表达方式"
 	}
-	return &ReviewExpressionOutput{Success: true, Message: msg}, nil
+	output := &ReviewExpressionOutput{Success: true, Message: msg}
+	LogToolCall("reviewExpression", input, output, nil)
+	return output, nil
 }
 
 func NewReviewExpressionTool() (tool.InvokableTool, error) {
@@ -139,10 +147,14 @@ func saveExpressionFunc(ctx context.Context, input *SaveExpressionInput) (*SaveE
 		Checked:   false,
 	})
 	if err != nil {
-		return &SaveExpressionOutput{Success: false, Message: err.Error()}, nil
+		output := &SaveExpressionOutput{Success: false, Message: err.Error()}
+		LogToolCall("saveExpression", input, output, err)
+		return output, nil
 	}
 
-	return &SaveExpressionOutput{Success: true, Message: "已记住这种表达方式"}, nil
+	output := &SaveExpressionOutput{Success: true, Message: "已记住这种表达方式"}
+	LogToolCall("saveExpression", input, output, nil)
+	return output, nil
 }
 
 func NewSaveExpressionTool() (tool.InvokableTool, error) {
