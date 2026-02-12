@@ -606,7 +606,7 @@ func (c *Client) parseMessageSegments(event map[string]interface{}, msg *GroupMe
 			}
 
 		case "forward": // 合并转发
-			if forwardID, ok := parseInt64(data["id"]); ok && forwardID != 0 {
+			if forwardID, ok := data["id"].(string); ok {
 				if nodes, err := c.GetForwardMsg(forwardID); err == nil && len(nodes) > 0 {
 					// 仅显示前四条，每条限制20个rune
 					limit := 4
@@ -1158,15 +1158,15 @@ func (c *Client) GetEssenceMessages(groupID int64) ([]EssenceMessage, error) {
 }
 
 // GetForwardMsg 获取合并转发消息内容
-func (c *Client) GetForwardMsg(forwardID int64) ([]ForwardMessage, error) {
-	if forwardID == 0 {
+func (c *Client) GetForwardMsg(forwardID string) ([]ForwardMessage, error) {
+	if forwardID == "" {
 		return nil, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	resp, err := c.callAPI(ctx, "get_forward_msg", map[string]interface{}{
-		"id": forwardID,
+		"message_id": forwardID,
 	})
 	if err != nil {
 		return nil, err
