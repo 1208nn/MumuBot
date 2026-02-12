@@ -159,10 +159,8 @@ func (s *Server) deleteMemory(c *gin.Context) {
 
 // listMembers 列出成员画像
 func (s *Server) listMembers(c *gin.Context) {
-	groupID, _ := strconv.ParseInt(c.DefaultQuery("group_id", "0"), 10, 64)
 	page, pageSize := parsePageParams(c)
-
-	profiles, total, err := s.memoryMgr.ListMemberProfiles(groupID, page, pageSize)
+	profiles, total, err := s.memoryMgr.ListMemberProfiles(page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -184,13 +182,8 @@ func (s *Server) getMember(c *gin.Context) {
 		return
 	}
 
-	groupID, _ := strconv.ParseInt(c.DefaultQuery("group_id", "0"), 10, 64)
-
 	var profile memory.MemberProfile
 	query := s.memoryMgr.GetDB().Where("user_id = ?", userID)
-	if groupID > 0 {
-		query = query.Where("group_id = ?", groupID)
-	}
 
 	if err := query.First(&profile).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "成员不存在"})

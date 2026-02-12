@@ -28,34 +28,33 @@ type SaveJargonOutput struct {
 
 // saveJargonFunc 保存黑话的实际实现
 func saveJargonFunc(ctx context.Context, input *SaveJargonInput) (*SaveJargonOutput, error) {
-	tc := GetToolContext(ctx)
-	if tc == nil {
-		return &SaveJargonOutput{Success: false, Message: "工具上下文未初始化"}, nil
+	lc := GetLearningContext(ctx)
+	if lc == nil {
+		return &SaveJargonOutput{Success: false, Message: "学习上下文未初始化"}, nil
 	}
 
-	if input.Content == "" {
-		return &SaveJargonOutput{Success: false, Message: "黑话内容不能为空"}, nil
-	}
-	if input.Meaning == "" {
-		return &SaveJargonOutput{Success: false, Message: "黑话含义不能为空"}, nil
+	if input.Content == "" || input.Meaning == "" {
+		return &SaveJargonOutput{Success: false, Message: "失败：黑话内容和含义不能为空"}, nil
 	}
 
 	jargon := &memory.Jargon{
-		GroupID: tc.GroupID,
-		Content: input.Content,
-		Meaning: input.Meaning,
-		Context: input.Context,
+		GroupID:  lc.GroupID,
+		Content:  input.Content,
+		Meaning:  input.Meaning,
+		Context:  input.Context,
+		Verified: false, // 学习模式下默认为未验证
 	}
 
-	if err := tc.MemoryMgr.SaveJargon(jargon); err != nil {
-		output := &SaveJargonOutput{Success: false, Message: err.Error()}
-		LogToolCall("saveJargon", input, output, err)
-		return output, nil
+	if err := lc.MemMgr.SaveJargon(jargon); err != nil {
+		return &SaveJargonOutput{Success: false, Message: err.Error()}, nil
 	}
 
-	output := &SaveJargonOutput{Success: true, Message: "已记住这个黑话"}
-	LogToolCall("saveJargon", input, output, nil)
-	return output, nil
+	// 实时更新 AC 自动机
+	if lc.JargonMgr != nil {
+		lc.JargonMgr.AddJargon(input.Content, input.Meaning)
+	}
+
+	return &SaveJargonOutput{Success: true, Message: "已记住这个黑话"}, nil
 }
 
 // NewSaveJargonTool 创建保存黑话工具
@@ -157,9 +156,9 @@ type GetUnverifiedJargonsOutput struct {
 }
 
 func getUnverifiedJargonsFunc(ctx context.Context, input *GetUnverifiedJargonsInput) (*GetUnverifiedJargonsOutput, error) {
-	tc := GetToolContext(ctx)
-	if tc == nil {
-		return &GetUnverifiedJargonsOutput{Success: false, Message: "工具上下文未初始化"}, nil
+	lc := GetLearningContext(ctx)
+	if lc == nil {
+		return &GetUnverifiedJargonsOutput{Success: false, Message: "学习上下文未初始化"}, nil
 	}
 
 	limit := input.Limit
@@ -167,11 +166,9 @@ func getUnverifiedJargonsFunc(ctx context.Context, input *GetUnverifiedJargonsIn
 		limit = 5
 	}
 
-	jargons, err := tc.MemoryMgr.GetUnverifiedJargons(tc.GroupID, limit)
+	jargons, err := lc.MemMgr.GetUnverifiedJargons(lc.GroupID, limit)
 	if err != nil {
-		output := &GetUnverifiedJargonsOutput{Success: false, Message: err.Error()}
-		LogToolCall("getUnverifiedJargons", input, output, err)
-		return output, nil
+		return &GetUnverifiedJargonsOutput{Success: false, Message: err.Error()}, nil
 	}
 
 	results := make([]UnverifiedJargonItem, 0, len(jargons))
@@ -184,9 +181,7 @@ func getUnverifiedJargonsFunc(ctx context.Context, input *GetUnverifiedJargonsIn
 		})
 	}
 
-	output := &GetUnverifiedJargonsOutput{Success: true, Jargons: results}
-	LogToolCall("getUnverifiedJargons", input, output, nil)
-	return output, nil
+	return &GetUnverifiedJargonsOutput{Success: true, Jargons: results}, nil
 }
 
 func NewGetUnverifiedJargonsTool() (tool.InvokableTool, error) {
@@ -210,29 +205,25 @@ type ReviewJargonOutput struct {
 }
 
 func reviewJargonFunc(ctx context.Context, input *ReviewJargonInput) (*ReviewJargonOutput, error) {
-	tc := GetToolContext(ctx)
-	if tc == nil {
-		return &ReviewJargonOutput{Success: false, Message: "工具上下文未初始化"}, nil
+	lc := GetLearningContext(ctx)
+	if lc == nil {
+		return &ReviewJargonOutput{Success: false, Message: "学习上下文未初始化"}, nil
 	}
 
 	if input.ID == 0 {
 		return &ReviewJargonOutput{Success: false, Message: "黑话 ID 不能为空"}, nil
 	}
 
-	err := tc.MemoryMgr.ReviewJargon(input.ID, input.Approve)
+	err := lc.MemMgr.ReviewJargon(input.ID, input.Approve)
 	if err != nil {
-		output := &ReviewJargonOutput{Success: false, Message: err.Error()}
-		LogToolCall("reviewJargon", input, output, err)
-		return output, nil
+		return &ReviewJargonOutput{Success: false, Message: err.Error()}, nil
 	}
 
 	msg := "已拒绝该黑话"
 	if input.Approve {
 		msg = "已验证该黑话"
 	}
-	output := &ReviewJargonOutput{Success: true, Message: msg}
-	LogToolCall("reviewJargon", input, output, nil)
-	return output, nil
+	return &ReviewJargonOutput{Success: true, Message: msg}, nil
 }
 
 func NewReviewJargonTool() (tool.InvokableTool, error) {

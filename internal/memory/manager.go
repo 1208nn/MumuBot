@@ -65,6 +65,7 @@ func NewManager(cfg *config.Config, embedding EmbeddingProvider) (*Manager, erro
 		&MessageLog{},
 		&Sticker{},
 		&MoodState{},
+		&LearningState{},
 	); err != nil {
 		return nil, fmt.Errorf("数据库迁移失败: %w", err)
 	}
@@ -128,7 +129,69 @@ func (m *Manager) GetRecentMessages(groupID int64, limit, offset int) []MessageL
 	return dbMsgs
 }
 
+// GetMessagesAfterID 获取指定消息ID之后的消息
+func (m *Manager) GetMessagesAfterID(groupID int64, lastID uint, limit int) ([]MessageLog, error) {
+	var dbMsgs []MessageLog
+	// 直接使用自增 ID 进行范围查询
+	err := m.db.Where("group_id = ? AND id > ?", groupID, lastID).
+		Order("id ASC").Limit(limit).Find(&dbMsgs).Error
+	return dbMsgs, err
+}
+
 // ==================== 长期记忆 ====================
+
+// SearchSimilarMemories 搜索相似的记忆
+func (m *Manager) SearchSimilarMemories(ctx context.Context, text string, groupID int64, threshold float64) ([]Memory, error) {
+	if m.milvus == nil || m.embedding == nil {
+		return nil, errors.New("向量检索未启用")
+	}
+
+	emb, err := m.embedding.Embed(ctx, text)
+	if err != nil {
+		return nil, err
+	}
+
+	// Milvus 搜索，limit 设大一点以防遗漏
+	results, err := m.milvusVectorSearch(ctx, emb, groupID, "", 15, threshold)
+	if err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+// UpdateMemoryContent 更新记忆内容（用于合并）
+func (m *Manager) UpdateMemoryContent(ctx context.Context, id uint, newContent string) error {
+	// 更新数据库
+	if err := m.db.Model(&Memory{}).Where("id = ?", id).Update("content", newContent).Error; err != nil {
+		return err
+	}
+
+	// 更新向量（先删后增）
+	if m.milvus != nil && m.embedding != nil {
+		_ = m.milvus.Delete(ctx, []uint{id})
+
+		emb, err := m.embedding.Embed(ctx, newContent)
+		if err == nil {
+			var mem Memory
+			if err := m.db.First(&mem, id).Error; err == nil {
+				_, _ = m.milvus.Insert(ctx, id, mem.GroupID, string(mem.Type), emb)
+			}
+		}
+	}
+	return nil
+}
+
+// DeleteMemory 删除记忆
+func (m *Manager) DeleteMemory(ctx context.Context, id uint) error {
+	if err := m.db.Delete(&Memory{}, id).Error; err != nil {
+		return err
+	}
+	if m.milvus != nil {
+		_ = m.milvus.Delete(ctx, []uint{id})
+	}
+	return nil
+}
 
 // SaveMemory 保存长期记忆
 func (m *Manager) SaveMemory(ctx context.Context, mem *Memory) error {
@@ -161,7 +224,7 @@ func (m *Manager) QueryMemory(ctx context.Context, query string, groupID int64, 
 	// 尝试 Milvus 向量搜索
 	if m.milvus != nil && m.embedding != nil {
 		if emb, err := m.embedding.Embed(ctx, query); err == nil {
-			if results, err := m.milvusVectorSearch(ctx, emb, groupID, memType, limit); err == nil && len(results) > 0 {
+			if results, err := m.milvusVectorSearch(ctx, emb, groupID, string(memType), limit, 0.7); err == nil && len(results) > 0 {
 				return results, nil
 			}
 		}
@@ -285,10 +348,9 @@ func (m *Manager) cleanupMessageLogs(keepLatest int) {
 	}
 }
 
-// milvusVectorSearch 使用 Milvus 进行向量搜索
-func (m *Manager) milvusVectorSearch(ctx context.Context, queryEmb []float64, groupID int64, memType MemoryType, limit int) ([]Memory, error) {
-	// 在 Milvus 中搜索
-	results, err := m.milvus.Search(ctx, queryEmb, groupID, string(memType), limit, m.cfg.Memory.LongTerm.SimilarityThreshold)
+// milvusVectorSearch 使用 Milvus 进行向量搜索并返回完整的 Memory 对象
+func (m *Manager) milvusVectorSearch(ctx context.Context, queryEmb []float64, groupID int64, memType string, limit int, threshold float64) ([]Memory, error) {
+	results, err := m.milvus.Search(ctx, queryEmb, groupID, memType, limit, threshold)
 	if err != nil {
 		return nil, err
 	}
@@ -308,13 +370,6 @@ func (m *Manager) milvusVectorSearch(ctx context.Context, queryEmb []float64, gr
 		return nil, err
 	}
 
-	// 更新访问计数
-	for _, mem := range memories {
-		m.db.Model(&mem).Updates(map[string]any{
-			"access_count": gorm.Expr("access_count + 1"),
-		})
-	}
-
 	// 按照搜索结果的顺序排序
 	memoryMap := make(map[uint]Memory)
 	for _, mem := range memories {
@@ -324,6 +379,9 @@ func (m *Manager) milvusVectorSearch(ctx context.Context, queryEmb []float64, gr
 	sortedMemories := make([]Memory, 0, len(results))
 	for _, r := range results {
 		if mem, ok := memoryMap[r.MemoryID]; ok {
+			m.db.Model(&mem).Updates(map[string]any{
+				"access_count": gorm.Expr("access_count + 1"),
+			})
 			sortedMemories = append(sortedMemories, mem)
 		}
 	}
@@ -470,6 +528,13 @@ func (m *Manager) GetUnverifiedJargons(groupID int64, limit int) ([]Jargon, erro
 	return jargons, err
 }
 
+// GetAllVerifiedJargons 获取所有已审核的黑话（用于构建 AC 自动机）
+func (m *Manager) GetAllVerifiedJargons() ([]Jargon, error) {
+	var jargons []Jargon
+	err := m.db.Where("verified = ?", true).Find(&jargons).Error
+	return jargons, err
+}
+
 // ==================== 成员画像 ====================
 
 // GetMemberProfile 获取成员画像
@@ -562,14 +627,11 @@ func (m *Manager) ListMemories(groupID int64, memType string, page, pageSize int
 	return items, total, err
 }
 
-func (m *Manager) ListMemberProfiles(groupID int64, page, pageSize int) ([]MemberProfile, int64, error) {
+func (m *Manager) ListMemberProfiles(page, pageSize int) ([]MemberProfile, int64, error) {
 	var items []MemberProfile
 	var total int64
 
 	q := m.db.Model(&MemberProfile{})
-	if groupID > 0 {
-		q = q.Where("group_id = ?", groupID)
-	}
 	q.Count(&total)
 
 	err := q.Order("msg_count DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&items).Error
@@ -765,4 +827,38 @@ func (m *Manager) ApplyMoodDecay() error {
 	mood.Sociability += (0.5 - mood.Sociability) * 0.05
 
 	return m.db.Save(mood).Error
+}
+
+// ==================== 学习状态管理 ====================
+
+// GetLearningState 获取群组的学习进度
+func (m *Manager) GetLearningState(groupID int64) (*LearningState, error) {
+	var state LearningState
+	err := m.db.Where("group_id = ?", groupID).First(&state).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return &LearningState{GroupID: groupID}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
+// UpdateLearningState 更新群组的学习进度
+func (m *Manager) UpdateLearningState(groupID int64, lastMessageID uint) error {
+	var state LearningState
+	err := m.db.Where("group_id = ?", groupID).First(&state).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		state = LearningState{
+			GroupID:       groupID,
+			LastMessageID: lastMessageID,
+		}
+		return m.db.Create(&state).Error
+	}
+	if err != nil {
+		return err
+	}
+
+	state.LastMessageID = lastMessageID
+	return m.db.Save(&state).Error
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"mumu-bot/internal/config"
+	"mumu-bot/internal/jargon"
 	"mumu-bot/internal/memory"
 	"mumu-bot/internal/onebot"
 	"time"
@@ -42,6 +43,28 @@ func WithToolContext(ctx context.Context, tc *ToolContext) context.Context {
 func GetToolContext(ctx context.Context) *ToolContext {
 	if tc, ok := ctx.Value(toolContextKey).(*ToolContext); ok {
 		return tc
+	}
+	return nil
+}
+
+// LearningContext 学习任务上下文
+type LearningContext struct {
+	GroupID   int64
+	MemMgr    *memory.Manager
+	JargonMgr *jargon.Manager
+}
+
+const learningContextKey ctxKey = "learning_context"
+
+// WithLearningContext 注入学习上下文
+func WithLearningContext(ctx context.Context, lc *LearningContext) context.Context {
+	return context.WithValue(ctx, learningContextKey, lc)
+}
+
+// GetLearningContext 获取学习上下文
+func GetLearningContext(ctx context.Context) *LearningContext {
+	if lc, ok := ctx.Value(learningContextKey).(*LearningContext); ok {
+		return lc
 	}
 	return nil
 }

@@ -66,6 +66,15 @@ chat:
       group_id: 0           # 0表示全局
       talk_value: 0.2       # 夜间降低发言频率
 
+# 学习系统配置
+learning:
+  enabled: true                 # 是否启用
+  interval_minutes: 10          # 学习任务间隔（分钟）
+  review_interval_hours: 2      # 审核任务间隔（小时）
+  max_step: 10                  # 学习 Agent 最大步数
+  batch_size: 100               # 每次学习的消息数量限制
+  min_msg_count: 5              # 触发学习的最少消息数量
+
 # LLM配置（使用 OpenAI 兼容格式）
 llm:
   api_key: ""        # 留空则使用 MUMU_LLM_API_KEY 环境变量
@@ -76,6 +85,12 @@ llm:
       "type": "disabled"
     }
   }   
+
+# 辅助模型配置（用于后台学习任务，不占用主模型资源）
+auxiliary_model:
+  api_key: ""        # 留空则使用 MUMU_AUX_LLM_API_KEY 或 MUMU_LLM_API_KEY 环境变量
+  base_url: ""
+  model: ""
 
 # Embedding模型配置（用于记忆检索）
 embedding:
@@ -109,12 +124,6 @@ memory:
     collection_name: "mumu_memories"
     vector_dim: 1024        # embedding 维度
     metric_type: "COSINE"   # 相似度度量类型: IP, L2, COSINE
-
-  # 长期记忆
-  long_term:
-    top_k: 10               # 检索返回数量
-    similarity_threshold: 0.7
-    importance_threshold: 0.5  # 记忆重要性阈值（低于此值不存入长期记忆）
 
   # 消息日志清理
   message_log_cleanup:

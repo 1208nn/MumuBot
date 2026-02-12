@@ -14,19 +14,21 @@ var (
 
 // Config 全局配置结构
 type Config struct {
-	App       AppConfig       `yaml:"app"`
-	Persona   PersonaConfig   `yaml:"persona"`
-	OneBot    OneBotConfig    `yaml:"onebot"`
-	Groups    []GroupConfig   `yaml:"groups"`
-	Agent     AgentConfig     `yaml:"agent"`
-	Chat      ChatConfig      `yaml:"chat"` // 聊天行为配置
-	LLM       LLMConfig       `yaml:"llm"`
-	Embedding EmbeddingConfig `yaml:"embedding"`
-	VisionLLM VisionLLMConfig `yaml:"vision_llm"`
-	Memory    MemoryConfig    `yaml:"memory"`
-	Sticker   StickerConfig   `yaml:"sticker"` // 表情包配置
-	Server    ServerConfig    `yaml:"server"`
-	Debug     DebugConfig     `yaml:"debug"` // 调试配置
+	App            AppConfig       `yaml:"app"`
+	Persona        PersonaConfig   `yaml:"persona"`
+	OneBot         OneBotConfig    `yaml:"onebot"`
+	Groups         []GroupConfig   `yaml:"groups"`
+	Agent          AgentConfig     `yaml:"agent"`
+	Chat           ChatConfig      `yaml:"chat"`     // 聊天行为配置
+	Learning       LearningConfig  `yaml:"learning"` // 学习系统配置
+	LLM            LLMConfig       `yaml:"llm"`
+	AuxiliaryModel AuxLLMConfig    `yaml:"auxiliary_model"` // 辅助模型配置
+	Embedding      EmbeddingConfig `yaml:"embedding"`
+	VisionLLM      VisionLLMConfig `yaml:"vision_llm"`
+	Memory         MemoryConfig    `yaml:"memory"`
+	Sticker        StickerConfig   `yaml:"sticker"` // 表情包配置
+	Server         ServerConfig    `yaml:"server"`
+	Debug          DebugConfig     `yaml:"debug"` // 调试配置
 }
 
 // AppConfig 应用基础配置
@@ -83,12 +85,29 @@ type TimeRuleConfig struct {
 	TalkValue float64 `yaml:"talk_value"` // 该时段的发言频率
 }
 
+// LearningConfig 学习系统配置
+type LearningConfig struct {
+	Enabled             bool `yaml:"enabled"`               // 是否启用
+	IntervalMinutes     int  `yaml:"interval_minutes"`      // 学习任务间隔（分钟）
+	ReviewIntervalHours int  `yaml:"review_interval_hours"` // 审核任务间隔（小时）
+	MaxStep             int  `yaml:"max_step"`              // 学习 Agent 最大步数
+	BatchSize           int  `yaml:"batch_size"`            // 每次学习的消息数量限制
+	MinMsgCount         int  `yaml:"min_msg_count"`         // 触发学习的最少消息数量
+}
+
 // LLMConfig LLM 配置
 type LLMConfig struct {
 	APIKey      string                 `yaml:"api_key"`
 	BaseURL     string                 `yaml:"base_url"`
 	Model       string                 `yaml:"model"`
 	ExtraFields map[string]interface{} `yaml:"extra_fields"` // 额外参数
+}
+
+// AuxLLMConfig 辅助 LLM 配置（结构相同但类型独立，方便扩展）
+type AuxLLMConfig struct {
+	APIKey  string `yaml:"api_key"`
+	BaseURL string `yaml:"base_url"`
+	Model   string `yaml:"model"`
 }
 
 // EmbeddingConfig Embedding 模型配置
@@ -111,7 +130,6 @@ type VisionLLMConfig struct {
 type MemoryConfig struct {
 	MySQL             MySQLConfig             `yaml:"mysql"`
 	Milvus            MilvusConfig            `yaml:"milvus"`
-	LongTerm          LongTermConfig          `yaml:"long_term"`
 	MessageLogCleanup MessageLogCleanupConfig `yaml:"message_log_cleanup"`
 }
 
@@ -139,13 +157,6 @@ type MilvusConfig struct {
 	CollectionName string `yaml:"collection_name"`
 	VectorDim      int    `yaml:"vector_dim"`
 	MetricType     string `yaml:"metric_type"` // IP, L2, COSINE
-}
-
-// LongTermConfig 长期记忆配置
-type LongTermConfig struct {
-	TopK                int     `yaml:"top_k"`                // 检索返回数量
-	SimilarityThreshold float64 `yaml:"similarity_threshold"` // 相似度阈值
-	ImportanceThreshold float64 `yaml:"importance_threshold"` // 重要性阈值
 }
 
 // StickerConfig 表情包配置
@@ -190,6 +201,14 @@ func Load(path string) (*Config, error) {
 		if apiKey := os.Getenv("MUMU_LLM_API_KEY"); apiKey != "" {
 			cfg.LLM.APIKey = apiKey
 		}
+		// Auxiliary Model API Key
+		if apiKey := os.Getenv("MUMU_AUX_LLM_API_KEY"); apiKey != "" {
+			cfg.AuxiliaryModel.APIKey = apiKey
+		} else if cfg.AuxiliaryModel.APIKey == "" && cfg.LLM.APIKey != "" {
+			// 如果没配辅助模型Key，且没设置专用环境变量，尝试复用主模型的Key
+			cfg.AuxiliaryModel.APIKey = cfg.LLM.APIKey
+		}
+
 		// Embedding API Key：优先使用专用环境变量，否则使用 LLM 的
 		if apiKey := os.Getenv("MUMU_EMBEDDING_API_KEY"); apiKey != "" {
 			cfg.Embedding.APIKey = apiKey

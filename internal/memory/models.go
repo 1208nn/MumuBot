@@ -125,3 +125,14 @@ type MoodState struct {
 }
 
 func (MoodState) TableName() string { return "mood_state" }
+
+// LearningState 学习状态记录
+type LearningState struct {
+	ID        uint      `gorm:"primarykey" json:"id"`
+	UpdatedAt time.Time `json:"updated_at"`
+
+	GroupID       int64  `gorm:"uniqueIndex" json:"group_id"`
+	LastMessageID uint   `json:"last_message_id"` // 上次学习到的最后一条消息ID (数据库自增ID)
+}
+
+func (LearningState) TableName() string { return "learning_states" }

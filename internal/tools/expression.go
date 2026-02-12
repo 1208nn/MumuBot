@@ -29,9 +29,9 @@ type GetUncheckedExpressionsOutput struct {
 }
 
 func getUncheckedExpressionsFunc(ctx context.Context, input *GetUncheckedExpressionsInput) (*GetUncheckedExpressionsOutput, error) {
-	tc := GetToolContext(ctx)
-	if tc == nil {
-		return &GetUncheckedExpressionsOutput{Success: false, Message: "工具上下文未初始化"}, nil
+	lc := GetLearningContext(ctx)
+	if lc == nil {
+		return &GetUncheckedExpressionsOutput{Success: false, Message: "学习上下文未初始化"}, nil
 	}
 
 	limit := input.Limit
@@ -39,11 +39,9 @@ func getUncheckedExpressionsFunc(ctx context.Context, input *GetUncheckedExpress
 		limit = 5
 	}
 
-	exps, err := tc.MemoryMgr.GetUncheckedExpressions(tc.GroupID, limit)
+	exps, err := lc.MemMgr.GetUncheckedExpressions(lc.GroupID, limit)
 	if err != nil {
-		output := &GetUncheckedExpressionsOutput{Success: false, Message: err.Error()}
-		LogToolCall("getUncheckedExpressions", input, output, err)
-		return output, nil
+		return &GetUncheckedExpressionsOutput{Success: false, Message: err.Error()}, nil
 	}
 
 	results := make([]UncheckedExpressionItem, 0, len(exps))
@@ -56,9 +54,7 @@ func getUncheckedExpressionsFunc(ctx context.Context, input *GetUncheckedExpress
 		})
 	}
 
-	output := &GetUncheckedExpressionsOutput{Success: true, Expressions: results}
-	LogToolCall("getUncheckedExpressions", input, output, nil)
-	return output, nil
+	return &GetUncheckedExpressionsOutput{Success: true, Expressions: results}, nil
 }
 
 func NewGetUncheckedExpressionsTool() (tool.InvokableTool, error) {
@@ -82,29 +78,25 @@ type ReviewExpressionOutput struct {
 }
 
 func reviewExpressionFunc(ctx context.Context, input *ReviewExpressionInput) (*ReviewExpressionOutput, error) {
-	tc := GetToolContext(ctx)
-	if tc == nil {
-		return &ReviewExpressionOutput{Success: false, Message: "工具上下文未初始化"}, nil
+	lc := GetLearningContext(ctx)
+	if lc == nil {
+		return &ReviewExpressionOutput{Success: false, Message: "学习上下文未初始化"}, nil
 	}
 
 	if input.ID == 0 {
 		return &ReviewExpressionOutput{Success: false, Message: "表达方式 ID 不能为空"}, nil
 	}
 
-	err := tc.MemoryMgr.ReviewExpression(input.ID, input.Approve)
+	err := lc.MemMgr.ReviewExpression(input.ID, input.Approve)
 	if err != nil {
-		output := &ReviewExpressionOutput{Success: false, Message: err.Error()}
-		LogToolCall("reviewExpression", input, output, err)
-		return output, nil
+		return &ReviewExpressionOutput{Success: false, Message: err.Error()}, nil
 	}
 
 	msg := "已拒绝该表达方式"
 	if input.Approve {
 		msg = "已通过该表达方式"
 	}
-	output := &ReviewExpressionOutput{Success: true, Message: msg}
-	LogToolCall("reviewExpression", input, output, nil)
-	return output, nil
+	return &ReviewExpressionOutput{Success: true, Message: msg}, nil
 }
 
 func NewReviewExpressionTool() (tool.InvokableTool, error) {
@@ -128,40 +120,29 @@ type SaveExpressionOutput struct {
 	Message string `json:"message"`
 }
 
+// saveExpressionFunc 保存表达方式的实际实现
 func saveExpressionFunc(ctx context.Context, input *SaveExpressionInput) (*SaveExpressionOutput, error) {
-	tc := GetToolContext(ctx)
-	if tc == nil {
-		return &SaveExpressionOutput{Success: false, Message: "工具上下文未初始化"}, nil
+	lc := GetLearningContext(ctx)
+	if lc == nil {
+		return &SaveExpressionOutput{Success: false, Message: "学习上下文未初始化"}, nil
 	}
 
-	if input.Situation == "" {
-		return &SaveExpressionOutput{Success: false, Message: "使用场景不能为空"}, nil
-	}
-	if input.Style == "" {
-		return &SaveExpressionOutput{Success: false, Message: "表达风格不能为空"}, nil
+	if input.Situation == "" || input.Style == "" {
+		return &SaveExpressionOutput{Success: false, Message: "失败：使用场景和表达风格不能为空"}, nil
 	}
 
-	exp := &memory.Expression{
-		GroupID:   tc.GroupID,
+	_, err := lc.MemMgr.SaveExpression(&memory.Expression{
+		GroupID:   lc.GroupID,
 		Situation: input.Situation,
 		Style:     input.Style,
 		Examples:  input.Example,
-	}
-
-	saved, err := tc.MemoryMgr.SaveExpression(exp)
+		Checked:   false,
+	})
 	if err != nil {
-		output := &SaveExpressionOutput{Success: false, Message: err.Error()}
-		LogToolCall("saveExpression", input, output, err)
-		return output, nil
+		return &SaveExpressionOutput{Success: false, Message: err.Error()}, nil
 	}
 
-	msg := "已记住这种表达方式"
-	if !saved {
-		msg = "已存在该表达方式，无需重复保存"
-	}
-	output := &SaveExpressionOutput{Success: true, Message: msg}
-	LogToolCall("saveExpression", input, output, nil)
-	return output, nil
+	return &SaveExpressionOutput{Success: true, Message: "已记住这种表达方式"}, nil
 }
 
 func NewSaveExpressionTool() (tool.InvokableTool, error) {

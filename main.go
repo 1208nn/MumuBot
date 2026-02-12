@@ -77,18 +77,18 @@ func main() {
 	defer botClient.Close()
 
 	// 创建人格
-	amuPersona := persona.NewPersona(&cfg.Persona)
-	zap.L().Info("人格已加载", zap.String("name", amuPersona.GetName()))
+	mumuPersona := persona.NewPersona(&cfg.Persona)
+	zap.L().Info("人格已加载", zap.String("name", mumuPersona.GetName()))
 
 	// 获取底层 ChatModel 作为 ToolCallingChatModel
 	chatModel := llmClient.GetModel()
 
 	// 创建 Agent
-	amuAgent, err := agent.New(cfg, amuPersona, memoryMgr, chatModel, visionClient, botClient)
+	mumuAgent, err := agent.New(cfg, mumuPersona, memoryMgr, chatModel, visionClient, botClient)
 	if err != nil {
 		zap.L().Fatal("Agent 创建失败", zap.Error(err))
 	}
-	amuAgent.Start()
+	mumuAgent.Start()
 
 	// 启动HTTP服务（用于健康检查等）
 	httpServer := server.NewServer(cfg, memoryMgr)
@@ -102,7 +102,7 @@ func main() {
 	<-quit
 
 	zap.L().Info("正在关闭...")
-	amuAgent.Stop()
+	mumuAgent.Stop()
 	httpServer.Stop()
 	zap.L().Info("再见！")
 }

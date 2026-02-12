@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math/rand"
 	"mumu-bot/internal/config"
+	"mumu-bot/internal/jargon"
+	"mumu-bot/internal/learning"
 	"mumu-bot/internal/llm"
 	"mumu-bot/internal/mcp"
 	"mumu-bot/internal/memory"
@@ -38,6 +40,9 @@ type Agent struct {
 	react   *react.Agent
 	tools   []tool.BaseTool
 	mcpMgr  *mcp.Manager // MCP 管理器
+
+	jargonMgr *jargon.Manager   // 黑话管理器
+	learner   *learning.Learner // 后台学习系统
 
 	// 消息缓冲（使用 ring buffer 避免扩容缩容开销）
 	buffers   map[int64]*utils.RingBuffer[*onebot.GroupMessage]
@@ -74,6 +79,17 @@ func New(
 		stopCh:            make(chan struct{}),
 	}
 
+	// 初始化黑话管理器
+	a.jargonMgr = jargon.New(mem)
+
+	// 初始化后台学习系统
+	learner, err := learning.New(cfg, mem, a.jargonMgr)
+	if err != nil {
+		zap.L().Warn("初始化后台学习系统失败", zap.Error(err))
+	} else {
+		a.learner = learner
+	}
+
 	// 初始化 MCP 管理器
 	a.mcpMgr = mcp.NewMCPManager()
 	if err := a.mcpMgr.LoadFromConfig("config/mcp.json"); err != nil {
@@ -94,18 +110,13 @@ func (a *Agent) initTools() error {
 		// 记忆相关
 		func() (tool.BaseTool, error) { return tools.NewSaveMemoryTool() },
 		func() (tool.BaseTool, error) { return tools.NewQueryMemoryTool() },
-		func() (tool.BaseTool, error) { return tools.NewSaveJargonTool() },
+		// 搜索黑话/表达
 		func() (tool.BaseTool, error) { return tools.NewSearchJargonTool() },
+		func() (tool.BaseTool, error) { return tools.NewSearchExpressionsTool() },
+		// 用户信息
 		func() (tool.BaseTool, error) { return tools.NewUpdateMemberProfileTool() },
 		func() (tool.BaseTool, error) { return tools.NewGetMemberInfoTool() },
 		func() (tool.BaseTool, error) { return tools.NewGetRecentMessagesTool() },
-		func() (tool.BaseTool, error) { return tools.NewSearchExpressionsTool() },
-		func() (tool.BaseTool, error) { return tools.NewSaveExpressionTool() },
-		// 审核工具
-		func() (tool.BaseTool, error) { return tools.NewGetUncheckedExpressionsTool() },
-		func() (tool.BaseTool, error) { return tools.NewReviewExpressionTool() },
-		func() (tool.BaseTool, error) { return tools.NewGetUnverifiedJargonsTool() },
-		func() (tool.BaseTool, error) { return tools.NewReviewJargonTool() },
 		// 发言相关
 		func() (tool.BaseTool, error) { return tools.NewSpeakTool() },
 		func() (tool.BaseTool, error) { return tools.NewStayQuietTool() },
@@ -168,6 +179,9 @@ func (a *Agent) initReact() error {
 
 // Start 启动
 func (a *Agent) Start() {
+	if a.learner != nil {
+		a.learner.Start()
+	}
 	a.bot.OnMessage(a.onMessage)
 	a.wg.Add(1)
 	go a.thinkLoop()
@@ -176,6 +190,9 @@ func (a *Agent) Start() {
 
 // Stop 停止
 func (a *Agent) Stop() {
+	if a.learner != nil {
+		a.learner.Stop()
+	}
 	close(a.stopCh)
 	a.wg.Wait()
 	// 关闭 MCP 连接
@@ -505,7 +522,23 @@ func (a *Agent) think(groupID int64, isMention bool) {
 	}
 
 	// 构建动态 prompt 上下文
-	promptCtx := a.buildPromptContext(ctx, groupID, chatContext)
+	promptCtx := &persona.PromptContext{
+		GroupID: groupID,
+	}
+
+	// 获取当前情绪状态
+	if mood, err := a.memory.GetMoodState(); err == nil {
+		promptCtx.MoodState = &persona.MoodInfo{
+			Valence:     mood.Valence,
+			Energy:      mood.Energy,
+			Sociability: mood.Sociability,
+		}
+	}
+
+	// 注入黑话/梗的解释（AC自动机匹配）
+	if a.jargonMgr != nil {
+		promptCtx.JargonMatches = a.jargonMgr.Match(chatContext)
+	}
 
 	// 获取说话者信息
 	memberInfo := a.getMemberInfo(groupID)
@@ -578,46 +611,6 @@ func (a *Agent) buildChatContext(groupID int64) string {
 		b.WriteString(m.FinalContent)
 	}
 	return b.String()
-}
-
-// buildPromptContext 构建动态 prompt 上下文
-func (a *Agent) buildPromptContext(ctx context.Context, groupID int64, chatContext string) *persona.PromptContext {
-	pc := &persona.PromptContext{
-		GroupID: groupID,
-	}
-
-	// 获取相关记忆（使用 TopK 配置）
-	topK := a.cfg.Memory.LongTerm.TopK
-	if topK <= 0 {
-		topK = 5
-	}
-	if mems, err := a.memory.QueryMemory(ctx, chatContext, groupID, "", topK); err == nil && len(mems) > 0 {
-		var lines []string
-		for _, m := range mems {
-			// 使用 ImportanceThreshold 过滤低重要性记忆
-			if m.Importance >= a.cfg.Memory.LongTerm.ImportanceThreshold {
-				lines = append(lines, fmt.Sprintf("- [%s] %s", m.Type, m.Content))
-			}
-		}
-		if len(lines) > 0 {
-			pc.Memories = strings.Join(lines, "\n")
-			// 调试：显示记忆检索结果
-			if a.cfg.Debug.ShowMemory {
-				zap.L().Debug("检索到相关记忆", zap.Int("count", len(lines)))
-			}
-		}
-	}
-
-	// 获取当前情绪状态
-	if mood, err := a.memory.GetMoodState(); err == nil {
-		pc.MoodState = &persona.MoodInfo{
-			Valence:     mood.Valence,
-			Energy:      mood.Energy,
-			Sociability: mood.Sociability,
-		}
-	}
-
-	return pc
 }
 
 // getMemberInfo 获取当前说话者信息
