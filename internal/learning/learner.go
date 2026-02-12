@@ -162,7 +162,7 @@ func (l *Learner) runReviewTask() {
 
 func (l *Learner) processReview(groupID int64) {
 	prompt := `请检查当前待审核的“黑话/梗”和“表达方式”。
-你需要使用 'getUnverifiedJargons' 和 'getUncheckedExpressions' 工具来获取待审核列表，然后使用 'reviewJargon' 和 'reviewExpression' 进行审核操作。
+你需要使用 'getUnverifiedJargons' 和 'getUncheckedExpressions' 工具来获取待审核列表。
 然后，根据你的知识库判断这些内容的准确性和健康度。
 - 如果内容准确且无害，使用 'reviewJargon' 或 'reviewExpression' 通过审核 (approve=true)。
 - 如果内容明显错误、垃圾信息或有害，请拒绝 (approve=false)。
@@ -244,18 +244,35 @@ func (l *Learner) processGroup(groupID int64) {
 		chatLog.WriteString(fmt.Sprintf("%s: %s\n", m.Nickname, m.Content))
 	}
 
+	// 注入已知的黑话/梗（避免重复学习）
+	knownJargons := ""
+	if l.jargonMgr != nil {
+		matches := l.jargonMgr.Match(chatLog.String())
+		if len(matches) > 0 {
+			var b strings.Builder
+			b.WriteString("\n【已知黑话】：\n")
+			for term, meaning := range matches {
+				b.WriteString(fmt.Sprintf("- %s: %s\n", term, meaning))
+			}
+			knownJargons = b.String()
+		}
+	}
+
 	prompt := fmt.Sprintf(`请分析以下 QQ 群聊天记录。你的任务是提取“黑话/梗”（该群体特有的术语、缩写、meme）和“表达方式”（说话风格、口头禅、句式）。
 
 聊天记录：
+
+%s
+
 %s
 
 要求：
-1. 识别**新的**黑话/梗，这些内容应是该群或该亚文化圈特有的。
+1. 识别**新的**黑话/梗。黑话的含义应该是与上下文相关的，如果无需上下文就可以推断该词的意思，则该词不是黑话。
 2. 识别独特的表达风格或口头禅。
-3. 忽略通用语言或普通词汇。专注于独特的群体文化。
+3. 忽略通用语言或普通词汇，专注于独特的群体文化。
 4. 使用提供的工具 'saveJargon' 和 'saveExpression' 来保存你的发现。
 5. 如果没有发现有价值的内容，请直接回复“无新发现”。
-`, chatLog.String())
+`, chatLog.String(), knownJargons)
 
 	// 创建学习上下文
 	ctx := context.Background()

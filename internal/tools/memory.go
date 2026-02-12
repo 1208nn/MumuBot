@@ -61,7 +61,7 @@ func saveMemoryFunc(ctx context.Context, input *SaveMemoryInput) (*SaveMemoryOut
 	}
 
 	// 向量相似度搜索
-	similarMems, err := tc.MemoryMgr.SearchSimilarMemories(ctx, input.Content, tc.GroupID, 0.8)
+	similarMems, err := tc.MemoryMgr.SearchSimilarMemories(ctx, input.Content, tc.GroupID, 0.85)
 	if err == nil && len(similarMems) > 0 {
 		// 调用辅助模型进行合并
 		cfg := config.Get()

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"mumu-bot/internal/memory"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -37,6 +38,38 @@ func saveJargonFunc(ctx context.Context, input *SaveJargonInput) (*SaveJargonOut
 		return &SaveJargonOutput{Success: false, Message: "失败：黑话内容和含义不能为空"}, nil
 	}
 
+	// 先查找是否存在
+	existingJargons, err := lc.MemMgr.SearchJargons(lc.GroupID, input.Content, 1)
+	var existing *memory.Jargon
+	if err == nil && len(existingJargons) > 0 {
+		// 精确匹配检查
+		if existingJargons[0].Content == input.Content {
+			existing = &existingJargons[0]
+		}
+	}
+
+	if existing != nil {
+		// 更新现有黑话
+		existing.Meaning = input.Meaning
+		if input.Context != "" {
+			existing.Context = input.Context
+		}
+		// 重新置为未验证，需要人工再次审核
+		existing.Verified = false
+
+		if err := lc.MemMgr.SaveJargon(existing); err != nil {
+			output := &SaveJargonOutput{Success: false, Message: err.Error()}
+			LogToolCall("saveJargon", input, output, err)
+			return output, nil
+		}
+
+		msg := fmt.Sprintf("已更新黑话 '%s' 的含义", input.Content)
+		output := &SaveJargonOutput{Success: true, Message: msg}
+		LogToolCall("saveJargon", input, output, nil)
+		return output, nil
+	}
+
+	// 新建黑话
 	jargon := &memory.Jargon{
 		GroupID:  lc.GroupID,
 		Content:  input.Content,
@@ -65,7 +98,7 @@ func saveJargonFunc(ctx context.Context, input *SaveJargonInput) (*SaveJargonOut
 func NewSaveJargonTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"saveJargon",
-		`保存群里的黑话、术语或梗。当群友使用了你不懂的词汇，并且你从上下文理解了它的含义时，可以保存下来。`,
+		`保存群里的黑话、术语或梗。可重复保存，会覆盖已有的记录。`,
 		saveJargonFunc,
 	)
 }
