@@ -40,13 +40,13 @@ type UpdateMemberProfileInput struct {
 	// UserID 群友的QQ号
 	UserID int64 `json:"user_id" jsonschema:"description=群友的QQ号"`
 	// SpeakStyle 说话风格描述
-	SpeakStyle string `json:"speak_style,omitempty" jsonschema:"description=说话风格描述"`
+	SpeakStyle string `json:"speak_style,omitempty" jsonschema:"description=说话风格描述（覆盖之前的描述）"`
 	// Interests 兴趣爱好列表
 	Interests []string `json:"interests,omitempty" jsonschema:"description=兴趣爱好列表（只传入新增的项）"`
 	// CommonWords 常用词汇或口头禅
 	CommonWords []string `json:"common_words,omitempty" jsonschema:"description=常用词汇或口头禅（只传入新增的项）"`
-	// Intimacy 亲密度 0-1，根据互动情况调整
-	Intimacy *float64 `json:"intimacy,omitempty" jsonschema:"description=亲密度0-1，根据与对方的互动频率、聊天深度、情感连接来评估。"`
+	// IntimacyDelta 亲密度变化值 -0.3 到 0.3
+	IntimacyDelta *float64 `json:"intimacy_delta,omitempty" jsonschema:"description=亲密度变化值，范围 -0.3 到 0.3，正数表示增加亲密度，负数表示降低亲密度"`
 }
 
 // UpdateMemberProfileOutput 更新成员画像的输出
@@ -100,15 +100,22 @@ func updateMemberProfileFunc(ctx context.Context, input *UpdateMemberProfileInpu
 		b, _ := sonic.MarshalString(mergedCommonWords)
 		profile.CommonWords = b
 	}
-	if input.Intimacy != nil {
-		// 限制亲密度在 0-1 范围内
-		intimacy := *input.Intimacy
-		if intimacy < 0 {
-			intimacy = 0
-		} else if intimacy > 1 {
-			intimacy = 1
+	if input.IntimacyDelta != nil {
+		// 限制变化值在 -0.3 到 0.3 范围内
+		delta := *input.IntimacyDelta
+		if delta < -0.3 {
+			delta = -0.3
+		} else if delta > 0.3 {
+			delta = 0.3
 		}
-		profile.Intimacy = intimacy
+
+		profile.Intimacy += delta
+		// 限制亲密度在 0-1 范围内
+		if profile.Intimacy < 0 {
+			profile.Intimacy = 0
+		} else if profile.Intimacy > 1 {
+			profile.Intimacy = 1
+		}
 	}
 
 	if err := tc.MemoryMgr.UpdateMemberProfile(profile); err != nil {
@@ -126,7 +133,7 @@ func updateMemberProfileFunc(ctx context.Context, input *UpdateMemberProfileInpu
 func NewUpdateMemberProfileTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"updateMemberProfile",
-		"更新你对某个群友的了解。当你发现群友的新特点、说话风格、兴趣爱好时使用。也可以根据互动情况调整亲密度（intimacy）。",
+		"更新你对某个群友的了解。当你发现群友的新特点、说话风格、兴趣爱好时使用。也可以根据互动情况调整亲密度（通过 intimacy_delta）。",
 		updateMemberProfileFunc,
 	)
 }
