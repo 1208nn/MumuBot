@@ -1,0 +1,102 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            output_name: mumu-bot
+            asset_name: mumu-bot-linux-amd64
+            archive_ext: .tar.gz
+          - goos: windows
+            goarch: amd64
+            output_name: mumu-bot.exe
+            asset_name: mumu-bot-windows-amd64
+            archive_ext: .zip
+          - goos: darwin
+            goarch: amd64
+            output_name: mumu-bot
+            asset_name: mumu-bot-darwin-amd64
+            archive_ext: .tar.gz
+          - goos: darwin
+            goarch: arm64
+            output_name: mumu-bot
+            asset_name: mumu-bot-darwin-arm64
+            archive_ext: .tar.gz
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version-file: 'go.mod'
+
+    - name: Prepare build directory
+      run: |
+        mkdir -p dist/config
+        cp config/config.example.yaml dist/config/config.yaml
+        cp config/mcp.example.json dist/config/mcp.json
+        cp README.md dist/
+        cp LICENSE dist/
+
+    - name: Build
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+        CGO_ENABLED: 0
+      run: |
+        go build -v -trimpath -ldflags "-s -w" -o dist/${{ matrix.output_name }} .
+
+    - name: Archive
+      run: |
+        cd dist
+        if [ "${{ matrix.goos }}" == "windows" ]; then
+          zip -r ../${{ matrix.asset_name }}${{ matrix.archive_ext }} .
+        else
+          tar -czvf ../${{ matrix.asset_name }}${{ matrix.archive_ext }} .
+        fi
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v6
+      with:
+        name: ${{ matrix.asset_name }}
+        path: ${{ matrix.asset_name }}${{ matrix.archive_ext }}
+
+  release:
+    name: Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
