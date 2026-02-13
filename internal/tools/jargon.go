@@ -55,7 +55,8 @@ func saveJargonFunc(ctx context.Context, input *SaveJargonInput) (*SaveJargonOut
 			existing.Context = input.Context
 		}
 		// 重新置为未验证，需要人工再次审核
-		existing.Verified = false
+		existing.Checked = false
+		existing.Rejected = false
 
 		if err := lc.MemMgr.SaveJargon(existing); err != nil {
 			output := &SaveJargonOutput{Success: false, Message: err.Error()}
@@ -75,7 +76,8 @@ func saveJargonFunc(ctx context.Context, input *SaveJargonInput) (*SaveJargonOut
 		Content:  input.Content,
 		Meaning:  input.Meaning,
 		Context:  input.Context,
-		Verified: false, // 学习模式下默认为未验证
+		Checked:  false, // 学习模式下默认为未验证
+		Rejected: false,
 	}
 
 	if err := lc.MemMgr.SaveJargon(jargon); err != nil {
@@ -151,7 +153,8 @@ func searchJargonFunc(ctx context.Context, input *SearchJargonInput) (*SearchJar
 			"content":  j.Content,
 			"meaning":  j.Meaning,
 			"context":  j.Context,
-			"verified": j.Verified,
+			"checked":  j.Checked,
+			"rejected": j.Rejected,
 		})
 	}
 
@@ -175,27 +178,27 @@ func NewSearchJargonTool() (tool.InvokableTool, error) {
 
 // ==================== 获取待审核黑话工具 ====================
 
-type GetUnverifiedJargonsInput struct {
+type GetUncheckedJargonsInput struct {
 	Limit int `json:"limit,omitempty" jsonschema:"description=返回数量，默认5"`
 }
 
-type UnverifiedJargonItem struct {
+type UncheckedJargonItem struct {
 	ID      uint   `json:"id"`
 	Content string `json:"content"`
 	Meaning string `json:"meaning"`
 	Context string `json:"context"`
 }
 
-type GetUnverifiedJargonsOutput struct {
-	Success bool                   `json:"success"`
-	Jargons []UnverifiedJargonItem `json:"jargons,omitempty"`
-	Message string                 `json:"message,omitempty"`
+type GetUncheckedJargonsOutput struct {
+	Success bool                  `json:"success"`
+	Jargons []UncheckedJargonItem `json:"jargons,omitempty"`
+	Message string                `json:"message,omitempty"`
 }
 
-func getUnverifiedJargonsFunc(ctx context.Context, input *GetUnverifiedJargonsInput) (*GetUnverifiedJargonsOutput, error) {
+func getUncheckedJargonsFunc(ctx context.Context, input *GetUncheckedJargonsInput) (*GetUncheckedJargonsOutput, error) {
 	lc := GetLearningContext(ctx)
 	if lc == nil {
-		return &GetUnverifiedJargonsOutput{Success: false, Message: "学习上下文未初始化"}, nil
+		return &GetUncheckedJargonsOutput{Success: false, Message: "学习上下文未初始化"}, nil
 	}
 
 	limit := input.Limit
@@ -203,16 +206,16 @@ func getUnverifiedJargonsFunc(ctx context.Context, input *GetUnverifiedJargonsIn
 		limit = 5
 	}
 
-	jargons, err := lc.MemMgr.GetUnverifiedJargons(lc.GroupID, limit)
+	jargons, err := lc.MemMgr.GetUncheckedJargons(lc.GroupID, limit)
 	if err != nil {
-		output := &GetUnverifiedJargonsOutput{Success: false, Message: err.Error()}
-		LogToolCall("getUnverifiedJargons", input, output, err)
+		output := &GetUncheckedJargonsOutput{Success: false, Message: err.Error()}
+		LogToolCall("getUncheckedJargons", input, output, err)
 		return output, nil
 	}
 
-	results := make([]UnverifiedJargonItem, 0, len(jargons))
+	results := make([]UncheckedJargonItem, 0, len(jargons))
 	for _, j := range jargons {
-		results = append(results, UnverifiedJargonItem{
+		results = append(results, UncheckedJargonItem{
 			ID:      j.ID,
 			Content: j.Content,
 			Meaning: j.Meaning,
@@ -220,16 +223,16 @@ func getUnverifiedJargonsFunc(ctx context.Context, input *GetUnverifiedJargonsIn
 		})
 	}
 
-	output := &GetUnverifiedJargonsOutput{Success: true, Jargons: results}
-	LogToolCall("getUnverifiedJargons", input, output, nil)
+	output := &GetUncheckedJargonsOutput{Success: true, Jargons: results}
+	LogToolCall("getUncheckedJargons", input, output, nil)
 	return output, nil
 }
 
-func NewGetUnverifiedJargonsTool() (tool.InvokableTool, error) {
+func NewGetUncheckedJargonsTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
-		"getUnverifiedJargons",
+		"getUncheckedJargons",
 		"查看待审核的黑话/术语。你可以检查这些黑话的含义是否准确。",
-		getUnverifiedJargonsFunc,
+		getUncheckedJargonsFunc,
 	)
 }
 

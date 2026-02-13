@@ -472,7 +472,7 @@ func (m *Manager) GetUncheckedExpressions(groupID int64, limit int) ([]Expressio
 // SearchJargons 搜索黑话（通过关键词匹配，本群优先）
 func (m *Manager) SearchJargons(groupID int64, keyword string, limit int) ([]Jargon, error) {
 	var jargons []Jargon
-	q := m.db.Model(&Jargon{})
+	q := m.db.Model(&Jargon{}).Where("rejected = ?", false)
 
 	// 使用 strings.Fields 切割关键词，挨个模糊匹配
 	if keyword != "" {
@@ -488,8 +488,8 @@ func (m *Manager) SearchJargons(groupID int64, keyword string, limit int) ([]Jar
 		}
 	}
 
-	// 本群优先排序：本群的排在前面，然后按 verified 降序
-	err := q.Order(fmt.Sprintf("CASE WHEN group_id = %d THEN 0 ELSE 1 END, verified DESC", groupID)).
+	// 本群优先排序：本群的排在前面，然后按 checked 降序
+	err := q.Order(fmt.Sprintf("CASE WHEN group_id = %d THEN 0 ELSE 1 END, checked DESC", groupID)).
 		Limit(limit).Find(&jargons).Error
 	return jargons, err
 }
@@ -506,8 +506,10 @@ func (m *Manager) SaveJargon(jargon *Jargon) error {
 	}
 
 	updates := map[string]any{
-		"meaning": jargon.Meaning,
-		"context": jargon.Context,
+		"meaning":  jargon.Meaning,
+		"context":  jargon.Context,
+		"checked":  false, // 重置审核状态
+		"rejected": false,
 	}
 	return m.db.Model(&existing).Updates(updates).Error
 }
@@ -515,23 +517,28 @@ func (m *Manager) SaveJargon(jargon *Jargon) error {
 // ReviewJargon 审核黑话
 func (m *Manager) ReviewJargon(id uint, approve bool) error {
 	updates := map[string]any{
-		"verified": approve,
+		"checked": true,
+	}
+	if approve {
+		updates["rejected"] = false
+	} else {
+		updates["rejected"] = true
 	}
 	return m.db.Model(&Jargon{}).Where("id = ?", id).Updates(updates).Error
 }
 
-// GetUnverifiedJargons 获取待审核的黑话
-func (m *Manager) GetUnverifiedJargons(groupID int64, limit int) ([]Jargon, error) {
+// GetUncheckedJargons 获取待审核的黑话
+func (m *Manager) GetUncheckedJargons(groupID int64, limit int) ([]Jargon, error) {
 	var jargons []Jargon
-	err := m.db.Where("group_id = ? AND verified = ?", groupID, false).
+	err := m.db.Where("group_id = ? AND checked = ?", groupID, false).
 		Limit(limit).Find(&jargons).Error
 	return jargons, err
 }
 
-// GetAllVerifiedJargons 获取所有已审核的黑话（用于构建 AC 自动机）
-func (m *Manager) GetAllVerifiedJargons() ([]Jargon, error) {
+// GetAllApprovedJargons 获取所有已审核通过的黑话（用于构建 AC 自动机）
+func (m *Manager) GetAllApprovedJargons() ([]Jargon, error) {
 	var jargons []Jargon
-	err := m.db.Where("verified = ?", true).Find(&jargons).Error
+	err := m.db.Where("checked = ? AND rejected = ?", true, false).Find(&jargons).Error
 	return jargons, err
 }
 

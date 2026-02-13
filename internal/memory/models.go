@@ -74,7 +74,8 @@ type Jargon struct {
 	Content  string `gorm:"type:varchar(100);index" json:"content"`
 	Meaning  string `gorm:"type:text" json:"meaning"`
 	Context  string `gorm:"type:text" json:"context"`
-	Verified bool   `gorm:"default:false" json:"verified"`
+	Checked  bool   `gorm:"default:false" json:"checked"`
+	Rejected bool   `gorm:"default:false" json:"rejected"`
 }
 
 func (Jargon) TableName() string { return "jargons" }
@@ -131,8 +132,8 @@ type LearningState struct {
 	ID        uint      `gorm:"primarykey" json:"id"`
 	UpdatedAt time.Time `json:"updated_at"`
 
-	GroupID       int64  `gorm:"uniqueIndex" json:"group_id"`
-	LastMessageID uint   `json:"last_message_id"` // 上次学习到的最后一条消息ID (数据库自增ID)
+	GroupID       int64 `gorm:"uniqueIndex" json:"group_id"`
+	LastMessageID uint  `json:"last_message_id"` // 上次学习到的最后一条消息ID (数据库自增ID)
 }
 
 func (LearningState) TableName() string { return "learning_states" }

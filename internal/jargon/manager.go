@@ -29,7 +29,7 @@ func New(memMgr *memory.Manager) *Manager {
 
 // Reload 从数据库重新加载所有黑话并构建全局 AC 自动机
 func (m *Manager) Reload() {
-	jargons, err := m.memMgr.GetAllVerifiedJargons()
+	jargons, err := m.memMgr.GetAllApprovedJargons()
 	if err != nil {
 		zap.L().Error("加载黑话失败", zap.Error(err))
 		return

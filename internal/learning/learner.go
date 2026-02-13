@@ -45,7 +45,7 @@ func New(cfg *config.Config, memMgr *memory.Manager, jargonMgr *jargon.Manager) 
 		func() (tool.BaseTool, error) { return tools.NewSaveExpressionTool() },
 		func() (tool.BaseTool, error) { return tools.NewGetUncheckedExpressionsTool() },
 		func() (tool.BaseTool, error) { return tools.NewReviewExpressionTool() },
-		func() (tool.BaseTool, error) { return tools.NewGetUnverifiedJargonsTool() },
+		func() (tool.BaseTool, error) { return tools.NewGetUncheckedJargonsTool() },
 		func() (tool.BaseTool, error) { return tools.NewReviewJargonTool() },
 	}
 	for _, build := range toolBuilders {
@@ -162,7 +162,7 @@ func (l *Learner) runReviewTask() {
 
 func (l *Learner) processReview(groupID int64) {
 	prompt := `请检查当前待审核的“黑话/梗”和“表达方式”。
-你需要使用 'getUnverifiedJargons' 和 'getUncheckedExpressions' 工具来获取待审核列表。
+你需要使用 'getUncheckedJargons' 和 'getUncheckedExpressions' 工具来获取待审核列表。
 然后，根据你的知识库判断这些内容的准确性和健康度。
 - 如果内容准确且无害，使用 'reviewJargon' 或 'reviewExpression' 通过审核 (approve=true)。
 - 如果内容明显错误、垃圾信息或有害，请拒绝 (approve=false)。

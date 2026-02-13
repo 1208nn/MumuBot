@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 
+	mutils "mumu-bot/internal/utils"
+
 	"github.com/bytedance/sonic"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
@@ -102,20 +104,8 @@ func updateMemberProfileFunc(ctx context.Context, input *UpdateMemberProfileInpu
 	}
 	if input.IntimacyDelta != nil {
 		// 限制变化值在 -0.3 到 0.3 范围内
-		delta := *input.IntimacyDelta
-		if delta < -0.3 {
-			delta = -0.3
-		} else if delta > 0.3 {
-			delta = 0.3
-		}
-
-		profile.Intimacy += delta
-		// 限制亲密度在 0-1 范围内
-		if profile.Intimacy < 0 {
-			profile.Intimacy = 0
-		} else if profile.Intimacy > 1 {
-			profile.Intimacy = 1
-		}
+		delta := mutils.ClampFloat64(*input.IntimacyDelta, -0.3, 0.3)
+		profile.Intimacy = mutils.ClampFloat64(profile.Intimacy+delta, 0, 1)
 	}
 
 	if err := tc.MemoryMgr.UpdateMemberProfile(profile); err != nil {
