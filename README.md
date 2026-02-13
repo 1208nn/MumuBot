@@ -104,6 +104,6 @@ go build -o mumu-bot .
 
 ## ❤️ 致谢
 
-- **[Eino](https://github.com/cloudwego/eino)** — 字节跳动开源 AI Agent 框架
-- **[NapCat](https://github.com/NapNeko/NapCatQQ)** — 现代化 OneBot 协议实现
-- **[MaiBot](https://github.com/Mai-with-u/MaiBot)** — 灵感来源
+- **[cloudwego/eino](https://github.com/cloudwego/eino)** — 字节跳动开源 AI Agent 框架
+- **[NapNeko/NapCatQQ](https://github.com/NapNeko/NapCatQQ)** — 现代化 OneBot 协议实现
+- **[Mai-with-u/MaiBot](https://github.com/Mai-with-u/MaiBot)** — 灵感来源和设计参考
