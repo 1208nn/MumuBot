@@ -85,7 +85,7 @@ func New(
 	// 初始化后台学习系统
 	learner, err := learning.New(cfg, mem, a.jargonMgr)
 	if err != nil {
-		zap.L().Warn("初始化后台学习系统失败", zap.Error(err))
+		zap.L().Error("初始化后台学习系统失败", zap.Error(err))
 	} else {
 		a.learner = learner
 	}
@@ -93,7 +93,7 @@ func New(
 	// 初始化 MCP 管理器
 	a.mcpMgr = mcp.NewMCPManager()
 	if err := a.mcpMgr.LoadFromConfig("config/mcp.json"); err != nil {
-		zap.L().Warn("加载 MCP 配置失败", zap.Error(err))
+		zap.L().Error("加载 MCP 配置失败", zap.Error(err))
 	}
 
 	if err := a.initTools(); err != nil {
@@ -370,14 +370,14 @@ func (a *Agent) getBuffer(groupID int64) []*onebot.GroupMessage {
 func (a *Agent) updateMember(msg *onebot.GroupMessage) {
 	p, err := a.memory.GetOrCreateMemberProfile(msg.UserID, msg.Nickname)
 	if err != nil {
-		zap.L().Warn("获取成员画像失败", zap.Error(err))
+		zap.L().Error("获取成员画像失败", zap.Error(err))
 		return
 	}
 	p.MsgCount++
 	p.LastSpeak = msg.Time
 	p.Nickname = msg.Nickname
 	if err := a.memory.UpdateMemberProfile(p); err != nil {
-		zap.L().Warn("更新成员画像失败", zap.Error(err))
+		zap.L().Error("更新成员画像失败", zap.Error(err))
 	}
 }
 

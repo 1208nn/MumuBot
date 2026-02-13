@@ -97,7 +97,7 @@ func saveMemoryFunc(ctx context.Context, input *SaveMemoryInput) (*SaveMemoryOut
 				// 更新最相似的那条记忆（通常是第一条），删除其他的
 				firstMem := similarMems[0]
 				if err := tc.MemoryMgr.UpdateMemoryContent(ctx, firstMem.ID, mergedContent); err != nil {
-					zap.L().Warn("合并记忆更新失败", zap.Error(err))
+					zap.L().Error("合并记忆更新失败", zap.Error(err))
 				} else {
 					// 删除其他重复的
 					for i := 1; i < len(similarMems); i++ {

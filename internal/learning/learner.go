@@ -8,6 +8,7 @@ import (
 	"mumu-bot/internal/llm"
 	"mumu-bot/internal/memory"
 	"mumu-bot/internal/tools"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -183,7 +184,7 @@ func (l *Learner) processReview(groupID int64) {
 		schema.UserMessage(prompt),
 	})
 	if err != nil {
-		zap.L().Warn("后台审核任务失败", zap.Int64("group_id", groupID), zap.Error(err))
+		zap.L().Error("后台审核任务失败", zap.Int64("group_id", groupID), zap.Error(err))
 		return
 	}
 
@@ -194,7 +195,7 @@ func (l *Learner) processGroup(groupID int64) {
 	// 获取上次学习进度
 	state, err := l.memMgr.GetLearningState(groupID)
 	if err != nil {
-		zap.L().Warn("获取学习进度失败", zap.Int64("group_id", groupID), zap.Error(err))
+		zap.L().Error("获取学习进度失败", zap.Int64("group_id", groupID), zap.Error(err))
 		return
 	}
 
@@ -203,9 +204,18 @@ func (l *Learner) processGroup(groupID int64) {
 	if batchSize <= 0 {
 		batchSize = 100
 	}
-	msgs, err := l.memMgr.GetMessagesAfterID(groupID, state.LastMessageID, batchSize)
+
+	// 过滤 Bot 自己的消息
+	botQQ := l.cfg.Persona.QQ
+	botID, err := strconv.ParseInt(botQQ, 10, 64)
 	if err != nil {
-		zap.L().Warn("获取消息失败", zap.Int64("group_id", groupID), zap.Error(err))
+		zap.L().Error("解析 Bot QQ 失败", zap.String("qq", botQQ), zap.Error(err))
+		return
+	}
+
+	msgs, err := l.memMgr.GetMessagesAfterID(groupID, botID, state.LastMessageID, batchSize)
+	if err != nil {
+		zap.L().Error("获取消息失败", zap.Int64("group_id", groupID), zap.Error(err))
 		return
 	}
 
@@ -219,28 +229,18 @@ func (l *Learner) processGroup(groupID int64) {
 		newLastID = msgs[len(msgs)-1].ID
 	}
 
-	// 过滤 Bot 自己的消息
-	botQQ := l.cfg.Persona.QQ
-	var validMsgs []memory.MessageLog
-	for _, m := range msgs {
-		if fmt.Sprintf("%d", m.UserID) == botQQ {
-			continue
-		}
-		validMsgs = append(validMsgs, m)
-	}
-
 	minMsgCount := l.cfg.Learning.MinMsgCount
 	if minMsgCount <= 0 {
 		minMsgCount = 5
 	}
-	if len(validMsgs) < minMsgCount {
+	if len(msgs) < minMsgCount {
 		// 消息太少，直接跳过，也不更新进度，等待积累更多
 		return
 	}
 
 	// 构建提示词
 	var chatLog strings.Builder
-	for _, m := range validMsgs {
+	for _, m := range msgs {
 		chatLog.WriteString(fmt.Sprintf("%s: %s\n", m.Nickname, m.Content))
 	}
 
@@ -287,7 +287,7 @@ func (l *Learner) processGroup(groupID int64) {
 		schema.UserMessage(prompt),
 	})
 	if err != nil {
-		zap.L().Warn("后台学习任务失败", zap.Int64("group_id", groupID), zap.Error(err))
+		zap.L().Error("后台学习任务失败", zap.Int64("group_id", groupID), zap.Error(err))
 		return
 	}
 
@@ -295,6 +295,6 @@ func (l *Learner) processGroup(groupID int64) {
 
 	// 更新进度
 	if err := l.memMgr.UpdateLearningState(groupID, newLastID); err != nil {
-		zap.L().Warn("更新学习进度失败", zap.Int64("group_id", groupID), zap.Error(err))
+		zap.L().Error("更新学习进度失败", zap.Int64("group_id", groupID), zap.Error(err))
 	}
 }

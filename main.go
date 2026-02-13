@@ -39,7 +39,7 @@ func main() {
 	// 创建 Embedding 客户端
 	embeddingClient, err := llm.NewEmbeddingClient(cfg)
 	if err != nil {
-		zap.L().Warn("Embedding 客户端创建失败，向量检索不可用", zap.Error(err))
+		zap.L().Error("Embedding 客户端创建失败，向量检索不可用", zap.Error(err))
 		embeddingClient = nil
 	}
 
@@ -63,7 +63,7 @@ func main() {
 	if cfg.VisionLLM.Enabled {
 		visionClient, err = llm.NewVisionClient(&cfg.VisionLLM)
 		if err != nil {
-			zap.L().Warn("Vision 客户端创建失败，视觉理解不可用", zap.Error(err))
+			zap.L().Error("Vision 客户端创建失败，视觉理解不可用", zap.Error(err))
 		} else {
 			zap.L().Info("Vision 已启用", zap.String("model", cfg.VisionLLM.Model))
 		}

@@ -130,10 +130,9 @@ func (m *Manager) GetRecentMessages(groupID int64, limit, offset int) []MessageL
 }
 
 // GetMessagesAfterID 获取指定消息ID之后的消息
-func (m *Manager) GetMessagesAfterID(groupID int64, lastID uint, limit int) ([]MessageLog, error) {
+func (m *Manager) GetMessagesAfterID(groupID int64, selfID int64, lastID uint, limit int) ([]MessageLog, error) {
 	var dbMsgs []MessageLog
-	// 直接使用自增 ID 进行范围查询
-	err := m.db.Where("group_id = ? AND id > ?", groupID, lastID).
+	err := m.db.Where("group_id = ? AND id > ? AND user_id != ?", groupID, lastID, selfID).
 		Order("id ASC").Limit(limit).Find(&dbMsgs).Error
 	return dbMsgs, err
 }
@@ -212,7 +211,7 @@ func (m *Manager) SaveMemory(ctx context.Context, mem *Memory) error {
 	if m.milvus != nil && len(embedding) > 0 {
 		if _, err := m.milvus.Insert(ctx, mem.ID, mem.GroupID, string(mem.Type), embedding); err != nil {
 			// 向量插入失败只记录日志，不影响主流程
-			zap.L().Warn("Milvus 插入向量失败", zap.Error(err))
+			zap.L().Error("Milvus 插入向量失败", zap.Error(err))
 		}
 	}
 
@@ -766,7 +765,7 @@ func (m *Manager) startMoodDecay() {
 			select {
 			case <-ticker.C:
 				if err := m.ApplyMoodDecay(); err != nil {
-					zap.L().Warn("情绪衰减失败", zap.Error(err))
+					zap.L().Error("情绪衰减失败", zap.Error(err))
 				}
 			case <-m.cleanupStop:
 				ticker.Stop()
