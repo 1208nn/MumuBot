@@ -226,7 +226,7 @@ func NewQueryMemoryTool() (tool.InvokableTool, error) {
 
 【scoped 参数使用指南】
 - scoped=false（默认）：搜索所有群的记忆，适合查找自身经历、过往事件等
-- scoped=true：只搜索当前群的记忆，适合查找当前群内事件、群规等
+- scoped=true：只搜索当前群的记忆，大部分时候不需要，因为各个群里的记忆通常是相关联的
 `,
 		queryMemoryFunc,
 	)
