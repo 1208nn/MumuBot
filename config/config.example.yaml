@@ -70,7 +70,7 @@ chat:
 learning:
   enabled: true                 # 是否启用
   interval_minutes: 10          # 学习任务间隔（分钟）
-  review_interval_hours: 2      # 审核任务间隔（小时）
+  review_interval_minutes: 45   # 审核任务间隔（分钟）
   max_step: 10                  # 学习 Agent 最大步数
   batch_size: 100               # 每次学习的消息数量限制
   min_msg_count: 5              # 触发学习的最少消息数量

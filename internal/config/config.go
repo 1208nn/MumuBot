@@ -87,12 +87,12 @@ type TimeRuleConfig struct {
 
 // LearningConfig 学习系统配置
 type LearningConfig struct {
-	Enabled             bool `yaml:"enabled"`               // 是否启用
-	IntervalMinutes     int  `yaml:"interval_minutes"`      // 学习任务间隔（分钟）
-	ReviewIntervalHours int  `yaml:"review_interval_hours"` // 审核任务间隔（小时）
-	MaxStep             int  `yaml:"max_step"`              // 学习 Agent 最大步数
-	BatchSize           int  `yaml:"batch_size"`            // 每次学习的消息数量限制
-	MinMsgCount         int  `yaml:"min_msg_count"`         // 触发学习的最少消息数量
+	Enabled               bool `yaml:"enabled"`                 // 是否启用
+	IntervalMinutes       int  `yaml:"interval_minutes"`        // 学习任务间隔（分钟）
+	ReviewIntervalMinutes int  `yaml:"review_interval_minutes"` // 审核任务间隔（分钟）
+	MaxStep               int  `yaml:"max_step"`                // 学习 Agent 最大步数
+	BatchSize             int  `yaml:"batch_size"`              // 每次学习的消息数量限制
+	MinMsgCount           int  `yaml:"min_msg_count"`           // 触发学习的最少消息数量
 }
 
 // LLMConfig LLM 配置

@@ -54,12 +54,12 @@ func (v *VisionClient) DescribeImage(ctx context.Context, imageURL string) (stri
 					MessagePartCommon: schema.MessagePartCommon{
 						URL: &imageURL,
 					},
-					Detail: schema.ImageURLDetailAuto,
+					Detail: schema.ImageURLDetailHigh,
 				},
 			},
 			{
 				Type: schema.ChatMessagePartTypeText,
-				Text: "请用中文描述这张图片的内容，不超过50字。如果是表情包请描述表情、情绪和文字。若画面中有明确角色（例如卡通/动漫/游戏/电影人物），请补充说明角色类型或出处（若能判断）、当前情绪状态、整体风格或用途（如吐槽、害怕、搞笑）",
+				Text: "请用中文描述这张图片的内容，输出一段100字以内的平文本。如果是表情包请描述表情、情绪、文字。若画面中有文字内容，请完整输出。若画面中有明确角色（例如卡通/动漫/游戏/电影人物），请补充说明角色类型或出处（若能判断）、当前情绪状态、整体风格或用途（如吐槽、害怕、搞笑）",
 			},
 		},
 	}
@@ -95,7 +95,7 @@ func (v *VisionClient) DescribeVideo(ctx context.Context, videoURL string) (stri
 			},
 			{
 				Type: schema.ChatMessagePartTypeText,
-				Text: "请用中文描述这个视频的内容，不超过80字。若能判断角色、情绪或关键事件、物体，请一并说明。",
+				Text: "请用中文描述这个视频的内容，输出一段100字以内的平文本。若能判断角色、情绪或关键事件、物体，请一并说明。",
 			},
 		},
 	}

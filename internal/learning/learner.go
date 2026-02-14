@@ -124,11 +124,11 @@ func (l *Learner) runLoop() {
 	go l.runTask()
 
 	// 启动定期审核任务
-	reviewIntervalHours := l.cfg.Learning.ReviewIntervalHours
-	if reviewIntervalHours <= 0 {
-		reviewIntervalHours = 2
+	reviewIntervalMinutes := l.cfg.Learning.ReviewIntervalMinutes
+	if reviewIntervalMinutes <= 0 {
+		reviewIntervalMinutes = 30
 	}
-	reviewTicker := time.NewTicker(time.Duration(reviewIntervalHours) * time.Hour)
+	reviewTicker := time.NewTicker(time.Duration(reviewIntervalMinutes) * time.Minute)
 	defer reviewTicker.Stop()
 
 	for {
