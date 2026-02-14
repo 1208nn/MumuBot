@@ -26,7 +26,6 @@ type ToolContext struct {
 	MemoryMgr     *memory.Manager
 	Bot           *onebot.Client
 	SpeakCallback SpeakCallback // 发言回调
-	StopThinking  func()        // 停止思考回调（用于 stayQuiet 强制停止）
 }
 
 // ctxKey 上下文键类型

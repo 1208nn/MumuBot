@@ -88,13 +88,6 @@ func stayQuietFunc(ctx context.Context, input *StayQuietInput) (*StayQuietOutput
 		Message: "保持沉默",
 	}
 	LogToolCall("stayQuiet", input, output, nil)
-
-	// 调用 StopThinking 强制停止思考
-	tc := GetToolContext(ctx)
-	if tc != nil && tc.StopThinking != nil {
-		tc.StopThinking()
-	}
-
 	return output, nil
 }
 

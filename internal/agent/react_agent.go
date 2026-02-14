@@ -166,9 +166,10 @@ func (a *Agent) initReact() error {
 		maxStep = 12 // 默认最大步数
 	}
 	agent, err := react.NewAgent(context.Background(), &react.AgentConfig{
-		ToolCallingModel: a.model,
-		ToolsConfig:      compose.ToolsNodeConfig{Tools: a.tools},
-		MaxStep:          maxStep,
+		ToolCallingModel:   a.model,
+		ToolsConfig:        compose.ToolsNodeConfig{Tools: a.tools},
+		MaxStep:            maxStep,
+		ToolReturnDirectly: map[string]struct{}{"stayQuiet": {}},
 	})
 	if err != nil {
 		return err
@@ -501,18 +502,13 @@ func (a *Agent) think(groupID int64, isMention bool) {
 		a.processingMu.Unlock()
 	}()
 
-	// 创建可取消的 context，用于 stayQuiet 强制停止思考
-	ctxWithCancel, cancelThinking := context.WithCancel(context.Background())
-	defer cancelThinking()
-
-	ctx := tools.WithToolContext(ctxWithCancel, &tools.ToolContext{
+	ctx := tools.WithToolContext(context.Background(), &tools.ToolContext{
 		GroupID:   groupID,
 		MemoryMgr: a.memory,
 		Bot:       a.bot,
 		SpeakCallback: func(gid int64, content string, replyTo int64, mentions []int64) int64 {
 			return a.doSpeak(gid, content, replyTo, mentions)
 		},
-		StopThinking: cancelThinking, // 传递取消函数
 	})
 
 	// 构建对话上下文
@@ -585,9 +581,6 @@ func (a *Agent) think(groupID int64, isMention bool) {
 		// 区分是超时还是主动取消（stayQuiet）
 		if errors.Is(ctxWithTimeout.Err(), context.DeadlineExceeded) {
 			zap.L().Warn("思考超时", zap.Int64("group_id", groupID), zap.Duration("timeout", timeout))
-		} else if errors.Is(ctxWithCancel.Err(), context.Canceled) {
-			// stayQuiet 触发的主动停止，这是正常行为，不记录错误
-			zap.L().Debug("思考结束（stayQuiet）", zap.Int64("group_id", groupID))
 		} else {
 			zap.L().Error("思考失败", zap.Int64("group_id", groupID), zap.Error(err))
 		}
