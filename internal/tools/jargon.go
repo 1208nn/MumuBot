@@ -239,8 +239,8 @@ func NewGetUncheckedJargonsTool() (tool.InvokableTool, error) {
 // ==================== 审核黑话工具 ====================
 
 type ReviewJargonInput struct {
-	ID      uint `json:"id" jsonschema:"description=黑话ID"`
-	Approve bool `json:"approve" jsonschema:"description=是否通过审核"`
+	IDs     []uint `json:"ids" jsonschema:"description=黑话ID列表"`
+	Approve bool   `json:"approve" jsonschema:"description=是否通过审核"`
 }
 
 type ReviewJargonOutput struct {
@@ -254,20 +254,20 @@ func reviewJargonFunc(ctx context.Context, input *ReviewJargonInput) (*ReviewJar
 		return &ReviewJargonOutput{Success: false, Message: "学习上下文未初始化"}, nil
 	}
 
-	if input.ID == 0 {
-		return &ReviewJargonOutput{Success: false, Message: "黑话 ID 不能为空"}, nil
+	if len(input.IDs) == 0 {
+		return &ReviewJargonOutput{Success: false, Message: "黑话 ID 列表不能为空"}, nil
 	}
 
-	err := lc.MemMgr.ReviewJargon(input.ID, input.Approve)
+	err := lc.MemMgr.BatchReviewJargon(input.IDs, input.Approve)
 	if err != nil {
 		output := &ReviewJargonOutput{Success: false, Message: err.Error()}
 		LogToolCall("reviewJargon", input, output, err)
 		return output, nil
 	}
 
-	msg := "已拒绝该黑话"
+	msg := "已拒绝这些黑话"
 	if input.Approve {
-		msg = "已验证该黑话"
+		msg = "已验证这些黑话"
 	}
 	output := &ReviewJargonOutput{Success: true, Message: msg}
 	LogToolCall("reviewJargon", input, output, nil)
@@ -277,7 +277,7 @@ func reviewJargonFunc(ctx context.Context, input *ReviewJargonInput) (*ReviewJar
 func NewReviewJargonTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"reviewJargon",
-		"审核一条黑话/术语。如果含义正确，可以通过验证；如果有误，可以拒绝。",
+		"批量审核黑话/术语。如果含义正确，可以通过验证；如果有误，可以拒绝。",
 		reviewJargonFunc,
 	)
 }

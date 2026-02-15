@@ -72,8 +72,8 @@ func NewGetUncheckedExpressionsTool() (tool.InvokableTool, error) {
 // ==================== 审核表达方式 ====================
 
 type ReviewExpressionInput struct {
-	ID      uint `json:"id" jsonschema:"description=表达方式ID"`
-	Approve bool `json:"approve" jsonschema:"description=是否通过审核"`
+	IDs     []uint `json:"ids" jsonschema:"description=表达方式ID列表"`
+	Approve bool   `json:"approve" jsonschema:"description=是否通过审核"`
 }
 
 type ReviewExpressionOutput struct {
@@ -87,20 +87,20 @@ func reviewExpressionFunc(ctx context.Context, input *ReviewExpressionInput) (*R
 		return &ReviewExpressionOutput{Success: false, Message: "学习上下文未初始化"}, nil
 	}
 
-	if input.ID == 0 {
-		return &ReviewExpressionOutput{Success: false, Message: "表达方式 ID 不能为空"}, nil
+	if len(input.IDs) == 0 {
+		return &ReviewExpressionOutput{Success: false, Message: "表达方式 ID 列表不能为空"}, nil
 	}
 
-	err := lc.MemMgr.ReviewExpression(input.ID, input.Approve)
+	err := lc.MemMgr.BatchReviewExpression(input.IDs, input.Approve)
 	if err != nil {
 		output := &ReviewExpressionOutput{Success: false, Message: err.Error()}
 		LogToolCall("reviewExpression", input, output, err)
 		return output, nil
 	}
 
-	msg := "已拒绝该表达方式"
+	msg := "已拒绝这些表达方式"
 	if input.Approve {
-		msg = "已通过该表达方式"
+		msg = "已通过这些表达方式"
 	}
 	output := &ReviewExpressionOutput{Success: true, Message: msg}
 	LogToolCall("reviewExpression", input, output, nil)
@@ -110,7 +110,7 @@ func reviewExpressionFunc(ctx context.Context, input *ReviewExpressionInput) (*R
 func NewReviewExpressionTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"reviewExpression",
-		"审核一条表达方式。如果你认为这个表达方式记录正确，可以通过；如果有误，可以拒绝。",
+		"批量审核表达方式。如果你认为这些表达方式记录正确，可以通过；如果有误，可以拒绝。",
 		reviewExpressionFunc,
 	)
 }

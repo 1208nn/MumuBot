@@ -169,7 +169,7 @@ func (l *Learner) processReview(groupID int64) {
 - 如果内容明显错误、垃圾信息或有害，请拒绝 (approve=false)。
 - 如果你不确定，请保持待审核状态（不做操作）。
 
-请批量处理，尽量清理待审核列表。`
+注意：审核工具支持批量操作，请将同一审核结果的 ID 放入列表中一次性提交，尽量减少工具调用次数。`
 
 	// 创建学习上下文
 	ctx := context.Background()

@@ -445,8 +445,11 @@ func (m *Manager) SearchExpressions(groupID int64, keyword string, limit int) ([
 	return expressions, err
 }
 
-// ReviewExpression 审核表达方式
-func (m *Manager) ReviewExpression(id uint, approve bool) error {
+// BatchReviewExpression 批量审核表达方式
+func (m *Manager) BatchReviewExpression(ids []uint, approve bool) error {
+	if len(ids) == 0 {
+		return nil
+	}
 	updates := map[string]any{
 		"checked": true,
 	}
@@ -455,7 +458,7 @@ func (m *Manager) ReviewExpression(id uint, approve bool) error {
 	} else {
 		updates["rejected"] = true
 	}
-	return m.db.Model(&Expression{}).Where("id = ?", id).Updates(updates).Error
+	return m.db.Model(&Expression{}).Where("id IN ?", ids).Updates(updates).Error
 }
 
 // GetUncheckedExpressions 获取待审核的表达方式
@@ -513,8 +516,11 @@ func (m *Manager) SaveJargon(jargon *Jargon) error {
 	return m.db.Model(&existing).Updates(updates).Error
 }
 
-// ReviewJargon 审核黑话
-func (m *Manager) ReviewJargon(id uint, approve bool) error {
+// BatchReviewJargon 批量审核黑话
+func (m *Manager) BatchReviewJargon(ids []uint, approve bool) error {
+	if len(ids) == 0 {
+		return nil
+	}
 	updates := map[string]any{
 		"checked": true,
 	}
@@ -523,7 +529,7 @@ func (m *Manager) ReviewJargon(id uint, approve bool) error {
 	} else {
 		updates["rejected"] = true
 	}
-	return m.db.Model(&Jargon{}).Where("id = ?", id).Updates(updates).Error
+	return m.db.Model(&Jargon{}).Where("id IN ?", ids).Updates(updates).Error
 }
 
 // GetUncheckedJargons 获取待审核的黑话
