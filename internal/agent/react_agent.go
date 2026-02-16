@@ -506,8 +506,11 @@ func (a *Agent) think(groupID int64, isMention bool) {
 		GroupID:   groupID,
 		MemoryMgr: a.memory,
 		Bot:       a.bot,
-		SpeakCallback: func(gid int64, content string, replyTo int64, mentions []int64) int64 {
+		SpeakCallback: func(gid int64, content string, replyTo int64, mentions []int64) (int64, error) {
 			return a.doSpeak(gid, content, replyTo, mentions)
+		},
+		SendStickerCallback: func(gid int64, filePath string, description string) (int64, error) {
+			return a.doSendSticker(gid, filePath, description)
 		},
 	})
 
@@ -637,7 +640,7 @@ func (a *Agent) getMemberInfo(groupID int64) string {
 }
 
 // doSpeak 执行发言，返回消息ID
-func (a *Agent) doSpeak(groupID int64, content string, replyTo int64, mentions []int64) int64 {
+func (a *Agent) doSpeak(groupID int64, content string, replyTo int64, mentions []int64) (int64, error) {
 	// 模拟打字延迟
 	if a.cfg.Chat.TypingSimulation {
 		typingSpeed := a.cfg.Chat.TypingSpeed
@@ -657,7 +660,7 @@ func (a *Agent) doSpeak(groupID int64, content string, replyTo int64, mentions [
 	msgID, err := a.bot.SendGroupMessage(groupID, content, replyTo, mentions)
 	if err != nil {
 		zap.L().Error("发言失败", zap.Int64("group_id", groupID), zap.Error(err))
-		return 0
+		return 0, err
 	}
 
 	msg := &onebot.GroupMessage{
@@ -671,7 +674,36 @@ func (a *Agent) doSpeak(groupID int64, content string, replyTo int64, mentions [
 	}
 	a.onMessage(msg)
 	zap.L().Info("发言成功", zap.Int64("group_id", groupID), zap.String("content", content))
-	return msgID
+	return msgID, nil
+}
+
+// doSendSticker 执行发送表情包，并记录消息
+func (a *Agent) doSendSticker(groupID int64, filePath string, description string) (int64, error) {
+	msgID, err := a.bot.SendImageMessage(groupID, filePath, true)
+	if err != nil {
+		zap.L().Error("发送表情包失败", zap.Int64("group_id", groupID), zap.String("path", filePath), zap.Error(err))
+		return 0, err
+	}
+
+	var content string
+	if description != "" {
+		content = fmt.Sprintf("[表情包:%s]", description)
+	} else {
+		content = "[表情包]"
+	}
+
+	msg := &onebot.GroupMessage{
+		MessageID:   msgID,
+		GroupID:     groupID,
+		UserID:      a.bot.GetSelfID(),
+		Nickname:    a.persona.GetName(),
+		Content:     content,
+		Time:        time.Now(),
+		MessageType: "group",
+	}
+	a.onMessage(msg)
+	zap.L().Info("发送表情包成功", zap.Int64("group_id", groupID), zap.String("desc", description))
+	return msgID, nil
 }
 
 // autoSaveSticker 自动保存表情包（异步执行）

@@ -29,16 +29,26 @@ type SpeakOutput struct {
 
 // speakFunc 发言的实际实现 - 会通过回调实际发送消息
 func speakFunc(ctx context.Context, input *SpeakInput) (*SpeakOutput, error) {
+	tc := GetToolContext(ctx)
+	if tc == nil {
+		return &SpeakOutput{Success: false, Message: "工具上下文未初始化"}, nil
+	}
+	if tc.SpeakCallback == nil {
+		return &SpeakOutput{Success: false, Message: "发言回调未初始化"}, nil
+	}
 	if input.Content == "" {
 		return &SpeakOutput{Success: false, Message: "说话内容不能为空"}, nil
 	}
 
-	var msgID int64
-	// 获取工具上下文
-	tc := GetToolContext(ctx)
-	if tc != nil && tc.SpeakCallback != nil {
-		// 通过回调发送消息，获取返回的消息ID
-		msgID = tc.SpeakCallback(tc.GroupID, input.Content, input.ReplyTo, input.Mentions)
+	// 通过回调发送消息，获取返回的消息ID
+	msgID, err := tc.SpeakCallback(tc.GroupID, input.Content, input.ReplyTo, input.Mentions)
+	if err != nil {
+		output := &SpeakOutput{
+			Success: false,
+			Message: err.Error(),
+		}
+		LogToolCall("speak", input, output, err)
+		return output, nil
 	}
 
 	output := &SpeakOutput{

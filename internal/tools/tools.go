@@ -18,14 +18,18 @@ import (
 )
 
 // SpeakCallback 发言回调函数类型，返回消息ID
-type SpeakCallback func(groupID int64, content string, replyTo int64, mentions []int64) int64
+type SpeakCallback func(groupID int64, content string, replyTo int64, mentions []int64) (int64, error)
+
+// SendStickerCallback 发送表情包回调函数类型
+type SendStickerCallback func(groupID int64, filePath string, description string) (int64, error)
 
 // ToolContext 工具执行上下文
 type ToolContext struct {
-	GroupID       int64
-	MemoryMgr     *memory.Manager
-	Bot           *onebot.Client
-	SpeakCallback SpeakCallback // 发言回调
+	GroupID             int64
+	MemoryMgr           *memory.Manager
+	Bot                 *onebot.Client
+	SpeakCallback       SpeakCallback       // 发言回调
+	SendStickerCallback SendStickerCallback // 发送表情包回调
 }
 
 // ctxKey 上下文键类型

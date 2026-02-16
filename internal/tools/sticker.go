@@ -92,8 +92,8 @@ func sendStickerFunc(ctx context.Context, input *SendStickerInput) (*SendSticker
 	if tc == nil {
 		return &SendStickerOutput{Success: false, Message: "工具上下文未初始化"}, nil
 	}
-	if tc.Bot == nil {
-		return &SendStickerOutput{Success: false, Message: "Bot 未连接"}, nil
+	if tc.SendStickerCallback == nil {
+		return &SendStickerOutput{Success: false, Message: "发送表情包回调未初始化"}, nil
 	}
 	if input.StickerID == 0 {
 		return &SendStickerOutput{Success: false, Message: "表情包 ID 不能为空"}, nil
@@ -127,10 +127,10 @@ func sendStickerFunc(ctx context.Context, input *SendStickerInput) (*SendSticker
 		return output, nil
 	}
 
-	// 发送图片（作为表情包）
-	msgID, err := tc.Bot.SendImageMessage(tc.GroupID, filePath, true)
+	// 发送表情包（使用回调以记录消息）
+	msgID, err := tc.SendStickerCallback(tc.GroupID, filePath, sticker.Description)
 	if err != nil {
-		output := &SendStickerOutput{Success: false, Message: "发送失败: " + err.Error()}
+		output := &SendStickerOutput{Success: false, Message: err.Error()}
 		LogToolCall("sendSticker", input, output, err)
 		return output, nil
 	}
