@@ -523,6 +523,29 @@ func (a *Agent) think(groupID int64, isMention bool) {
 		GroupID: groupID,
 	}
 
+	// 主动记忆检索
+	if a.cfg.Agent.EnableActiveRetrieval {
+		threshold := 0.7
+
+		// 获取上下文消息内容
+		msgs := a.getBuffer(groupID)
+		var contentBuilder strings.Builder
+		for _, m := range msgs {
+			contentBuilder.WriteString(m.Content) // 使用语义内容字段
+		}
+
+		// 向量搜索
+		if contentBuilder.Len() > 0 {
+			memories, err := a.memory.SearchSimilarMemories(ctx, contentBuilder.String(), 0, threshold)
+			if err != nil {
+				zap.L().Warn("主动记忆检索失败", zap.Error(err))
+			} else if len(memories) > 0 {
+				promptCtx.RelatedMemories = memories
+				zap.L().Debug("主动记忆检索成功", zap.Int("count", len(memories)))
+			}
+		}
+	}
+
 	// 获取当前情绪状态
 	if mood, err := a.memory.GetMoodState(); err == nil {
 		promptCtx.MoodState = &persona.MoodInfo{

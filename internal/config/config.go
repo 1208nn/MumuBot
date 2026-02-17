@@ -63,10 +63,11 @@ type GroupConfig struct {
 
 // AgentConfig Agent决策配置
 type AgentConfig struct {
-	ObserveWindow     int `yaml:"observe_window"`      // 观察窗口时间（秒）
-	ThinkInterval     int `yaml:"think_interval"`      // 决策间隔（秒）
-	MessageBufferSize int `yaml:"message_buffer_size"` // 消息缓冲区大小
-	MaxStep           int `yaml:"max_step"`            // ReAct 最大步数
+	ObserveWindow         int  `yaml:"observe_window"`          // 观察窗口时间（秒）
+	ThinkInterval         int  `yaml:"think_interval"`          // 决策间隔（秒）
+	MessageBufferSize     int  `yaml:"message_buffer_size"`     // 消息缓冲区大小
+	MaxStep               int  `yaml:"max_step"`                // ReAct 最大步数
+	EnableActiveRetrieval bool `yaml:"enable_active_retrieval"` // 是否启用主动记忆检索（阈值固定0.7）
 }
 
 // ChatConfig 聊天行为配置

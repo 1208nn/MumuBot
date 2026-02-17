@@ -54,6 +54,7 @@ agent:
   think_interval: 15         # 决策间隔（秒）
   message_buffer_size: 15   # 消息缓冲区大小
   max_step: 12               # ReAct 最大步数
+  enable_active_retrieval: true # 是否启用主动记忆检索
 
 # 聊天行为配置
 chat:

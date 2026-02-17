@@ -3,6 +3,7 @@ package persona
 import (
 	"fmt"
 	"mumu-bot/internal/config"
+	"mumu-bot/internal/memory"
 	"strings"
 	"time"
 
@@ -18,9 +19,10 @@ type MoodInfo struct {
 
 // PromptContext 动态 prompt 上下文
 type PromptContext struct {
-	GroupID       int64
-	MoodState     *MoodInfo         // 当前情绪状态
-	JargonMatches map[string]string // 匹配到的黑话/梗
+	GroupID         int64
+	MoodState       *MoodInfo         // 当前情绪状态
+	JargonMatches   map[string]string // 匹配到的黑话/梗
+	RelatedMemories []memory.Memory   // 相关记忆 (完整对象)
 }
 
 // Persona 人格定义
@@ -135,9 +137,21 @@ func (p *Persona) GetThinkPrompt(ctx *PromptContext, chatContext string, groupEx
 
 	// 动态部分：黑话/梗解释
 	if ctx != nil && len(ctx.JargonMatches) > 0 {
-		b.WriteString("\n\n【检测以下术语/黑话，可参考其含义】：\n")
+		b.WriteString("\n## 术语/黑话解释\n")
 		for term, meaning := range ctx.JargonMatches {
 			b.WriteString(fmt.Sprintf("- %s: %s\n", term, meaning))
+		}
+	}
+
+	// 动态部分：相关记忆
+	if ctx != nil && len(ctx.RelatedMemories) > 0 {
+		b.WriteString("\n## 相关记忆\n")
+		for _, mem := range ctx.RelatedMemories {
+			b.WriteString(fmt.Sprintf("- [%s] (重要性:%.1f 访问:%d) %s\n",
+				mem.CreatedAt.Format("2006-01-02"),
+				mem.Importance,
+				mem.AccessCount,
+				mem.Content))
 		}
 	}
 
