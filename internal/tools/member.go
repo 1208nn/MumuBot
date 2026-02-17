@@ -123,7 +123,7 @@ func updateMemberProfileFunc(ctx context.Context, input *UpdateMemberProfileInpu
 func NewUpdateMemberProfileTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"updateMemberProfile",
-		"更新你对某个群友的了解。当你发现群友的新特点、说话风格、兴趣爱好时使用。也可以根据互动情况调整亲密度（通过 intimacy_delta）。",
+		"更新你对某个群友的了解。当你发现群友的新特点、说话风格、兴趣爱好时使用。也可以根据互动情况调整亲密度。",
 		updateMemberProfileFunc,
 	)
 }

@@ -120,8 +120,6 @@ func (a *Agent) initTools() error {
 		// 发言相关
 		func() (tool.BaseTool, error) { return tools.NewSpeakTool() },
 		func() (tool.BaseTool, error) { return tools.NewStayQuietTool() },
-		// 时间
-		func() (tool.BaseTool, error) { return tools.NewGetCurrentTimeTool() },
 		// 群交互
 		func() (tool.BaseTool, error) { return tools.NewGetGroupInfoTool() },
 		func() (tool.BaseTool, error) { return tools.NewGetGroupMemberDetailTool() },
@@ -515,7 +513,7 @@ func (a *Agent) think(groupID int64, isMention bool) {
 	})
 
 	// 构建对话上下文
-	chatContext := a.buildChatContext(groupID)
+	chatContext := a.buildChatContext(groupID, lastProcessedTime)
 	if chatContext == "" {
 		return
 	}
@@ -552,13 +550,6 @@ func (a *Agent) think(groupID int64, isMention bool) {
 	}
 
 	thinkPrompt := a.persona.GetThinkPrompt(promptCtx, chatContext, groupExtra, memberInfo)
-
-	// 注入上次处理时间到提示词
-	if !lastProcessedTime.IsZero() {
-		thinkPrompt += fmt.Sprintf("\n\n注意：你上次处理消息的时间是 [%s]，在那之后的消息是新发生的。请结合上下文判断是否需要回复新消息。",
-			lastProcessedTime.Format("15:04:05"))
-	}
-
 	if isMention {
 		thinkPrompt += "\n\n注意：有人提到你了，可能在找你说话，你可以看情况回复。"
 	}
@@ -596,7 +587,7 @@ func (a *Agent) think(groupID int64, isMention bool) {
 }
 
 // buildChatContext 构建聊天上下文
-func (a *Agent) buildChatContext(groupID int64) string {
+func (a *Agent) buildChatContext(groupID int64, lastProcessedTime time.Time) string {
 	msgs := a.getBuffer(groupID)
 	if len(msgs) == 0 {
 		return ""
@@ -604,6 +595,9 @@ func (a *Agent) buildChatContext(groupID int64) string {
 
 	var b strings.Builder
 	for _, m := range msgs {
+		if !lastProcessedTime.IsZero() && m.Time.Before(lastProcessedTime) {
+			b.WriteString("(OLD)")
+		}
 		b.WriteString(m.FinalContent)
 	}
 	return b.String()

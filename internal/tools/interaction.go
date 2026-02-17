@@ -72,7 +72,7 @@ func NewSpeakTool() (tool.InvokableTool, error) {
 - 正确示例：speak("你好")，再调用speak("今天天气真好")
 - 错误示例：speak("你好。今天天气真好") 或 speak("你好\n今天天气真好")
 - 明确回复某条消息时使用 reply_to 参数，不要回复自己的话
-- @群友使用 mentions 参数（可以同时@多个人），不要在内容里直接写 @XXX`,
+- at群友时用 mentions 参数（可以同时at多个人），不要在内容里写"@"符号`,
 		speakFunc,
 	)
 }
@@ -105,12 +105,7 @@ func stayQuietFunc(ctx context.Context, input *StayQuietInput) (*StayQuietOutput
 func NewStayQuietTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"stayQuiet",
-		`选择不说话，保持沉默。当话题你不熟悉、不感兴趣、或者觉得没必要插嘴时使用。
-
-【重要】使用规则：
-- stayQuiet 应该在你决定不发言时**最后调用**
-- 调用 stayQuiet 后必须立刻停止，不要再调用任何工具
-- 如果你想说话，请用 speak，不要在 stayQuiet 之后再 speak`,
+		`选择不说话，保持沉默。当话题你不熟悉、不感兴趣、或者觉得没必要插嘴时使用。stayQuiet 应该在你决定不发言时**最后调用**`,
 		stayQuietFunc,
 	)
 }

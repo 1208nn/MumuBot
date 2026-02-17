@@ -149,12 +149,12 @@ func searchJargonFunc(ctx context.Context, input *SearchJargonInput) (*SearchJar
 	results := make([]map[string]any, 0, len(jargons))
 	for _, j := range jargons {
 		results = append(results, map[string]any{
-			"id":       j.ID,
-			"content":  j.Content,
-			"meaning":  j.Meaning,
-			"context":  j.Context,
-			"checked":  j.Checked,
-			"rejected": j.Rejected,
+			"id":                 j.ID,
+			"content":            j.Content,
+			"meaning":            j.Meaning,
+			"context":            j.Context,
+			"checked":            j.Checked,
+			"from_current_group": j.GroupID == tc.GroupID,
 		})
 	}
 

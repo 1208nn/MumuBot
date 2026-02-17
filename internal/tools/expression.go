@@ -160,7 +160,7 @@ func saveExpressionFunc(ctx context.Context, input *SaveExpressionInput) (*SaveE
 func NewSaveExpressionTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"saveExpression",
-		"保存你学到的群友表达方式或口头禅。当你发现群友在特定场景下有独特的说话习惯时，可以记录下来以便模仿。不要记录自己的表达方式！",
+		"保存你从群友那学到的表达方式或口头禅。",
 		saveExpressionFunc,
 	)
 }
@@ -224,7 +224,7 @@ func searchExpressionsFunc(ctx context.Context, input *SearchExpressionsInput) (
 func NewSearchExpressionsTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"searchExpressions",
-		"搜索你从群友学到的表达方式和口头禅。",
+		"搜索你学到的表达方式和口头禅。",
 		searchExpressionsFunc,
 	)
 }

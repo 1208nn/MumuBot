@@ -86,58 +86,6 @@ func LogToolCall(toolName string, input interface{}, output interface{}, err err
 	}
 }
 
-// ==================== 获取当前时间工具 ====================
-
-// GetCurrentTimeOutput 获取当前时间的输出
-type GetCurrentTimeOutput struct {
-	Time      string `json:"time"`
-	Weekday   string `json:"weekday"`
-	Period    string `json:"period"`
-	IsLate    bool   `json:"is_late"`
-	IsWeekend bool   `json:"is_weekend"`
-}
-
-// getCurrentTimeFunc 获取当前时间的实际实现
-func getCurrentTimeFunc(_ context.Context, _ *struct{}) (*GetCurrentTimeOutput, error) {
-	now := time.Now()
-	hour := now.Hour()
-
-	var period string
-	switch {
-	case hour >= 6 && hour < 9:
-		period = "早上"
-	case hour >= 9 && hour < 12:
-		period = "上午"
-	case hour >= 12 && hour < 14:
-		period = "中午"
-	case hour >= 14 && hour < 18:
-		period = "下午"
-	case hour >= 18 && hour < 22:
-		period = "晚上"
-	default:
-		period = "深夜"
-	}
-
-	output := &GetCurrentTimeOutput{
-		Time:      now.Format(time.DateTime),
-		Weekday:   now.Weekday().String(),
-		Period:    period,
-		IsLate:    hour >= 23 || hour < 6,
-		IsWeekend: now.Weekday() == time.Saturday || now.Weekday() == time.Sunday,
-	}
-	LogToolCall("getCurrentTime", nil, output, nil)
-	return output, nil
-}
-
-// NewGetCurrentTimeTool 创建获取当前时间工具
-func NewGetCurrentTimeTool() (tool.InvokableTool, error) {
-	return utils.InferTool(
-		"getCurrentTime",
-		"获取当前时间，可以用来判断是白天还是晚上，是否该睡觉了等。",
-		getCurrentTimeFunc,
-	)
-}
-
 // ==================== 获取群信息工具 ====================
 
 // GetGroupInfoInput 获取群信息的输入参数
