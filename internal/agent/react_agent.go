@@ -333,9 +333,14 @@ func (a *Agent) parseMessageContent(msg *onebot.GroupMessage) string {
 		}
 	}
 
+	qid := fmt.Sprintf("%d", msg.UserID)
+	if qid == a.cfg.Persona.QQ {
+		qid = "你"
+	}
+
 	// 构建完整消息行
-	return fmt.Sprintf("[%s] #%d %s(%d):%s %s\n",
-		msg.Time.Format("15:04:05"), msg.MessageID, msg.Nickname, msg.UserID, replyInfo, content)
+	return fmt.Sprintf("[%s] #%d %s(%s):%s %s\n",
+		msg.Time.Format("15:04:05"), msg.MessageID, msg.Nickname, qid, replyInfo, content)
 }
 
 func (a *Agent) addBuffer(msg *onebot.GroupMessage) {
