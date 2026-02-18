@@ -67,6 +67,7 @@ type AgentConfig struct {
 	ThinkInterval         int  `yaml:"think_interval"`          // 决策间隔（秒）
 	MessageBufferSize     int  `yaml:"message_buffer_size"`     // 消息缓冲区大小
 	MaxStep               int  `yaml:"max_step"`                // ReAct 最大步数
+	MaxCoroutine          int  `yaml:"max_coroutine"`           // 最大并发思考进程数（0表示不限制）
 	EnableActiveRetrieval bool `yaml:"enable_active_retrieval"` // 是否启用主动记忆检索（阈值固定0.7）
 }
 

@@ -31,15 +31,16 @@ import (
 
 // Agent 沐沐智能体
 type Agent struct {
-	cfg     *config.Config
-	persona *persona.Persona
-	memory  *memory.Manager
-	model   model.ToolCallingChatModel
-	vision  *llm.VisionClient // 多模态视觉模型
-	bot     *onebot.Client
-	react   *react.Agent
-	tools   []tool.BaseTool
-	mcpMgr  *mcp.Manager // MCP 管理器
+	cfg            *config.Config
+	persona        *persona.Persona
+	memory         *memory.Manager
+	model          model.ToolCallingChatModel
+	vision         *llm.VisionClient // 多模态视觉模型
+	bot            *onebot.Client
+	react          *react.Agent
+	tools          []tool.BaseTool
+	mcpMgr         *mcp.Manager        // MCP 管理器
+	concurrencyMgr *ConcurrencyManager // 并发管理器
 
 	jargonMgr *jargon.Manager   // 黑话管理器
 	learner   *learning.Learner // 后台学习系统
@@ -78,6 +79,9 @@ func New(
 		lastProcessedTime: make(map[int64]time.Time),
 		stopCh:            make(chan struct{}),
 	}
+
+	// 初始化并发管理器
+	a.concurrencyMgr = NewConcurrencyManager(cfg.Agent.MaxCoroutine, a.think)
 
 	// 初始化黑话管理器
 	a.jargonMgr = jargon.New(mem)
@@ -248,7 +252,7 @@ func (a *Agent) onMessage(msg *onebot.GroupMessage) {
 
 	// 如果被 @ 了，立即触发一次思考（跳过等待）
 	if isMentioned {
-		go a.think(msg.GroupID, true)
+		go a.concurrencyMgr.Submit(msg.GroupID, true)
 	}
 }
 
@@ -437,7 +441,7 @@ func (a *Agent) thinkCycle() {
 		if rand.Float64() > speakProb {
 			continue
 		}
-		a.think(gc.GroupID, false)
+		a.concurrencyMgr.Submit(gc.GroupID, false)
 	}
 }
 
@@ -483,7 +487,7 @@ func (a *Agent) getSpeakProbability(groupID int64) float64 {
 	return baseProb
 }
 
-// think 进行思考和决策
+// think 提交思考任务
 func (a *Agent) think(groupID int64, isMention bool) {
 	if a.bot.IsSelfMuted(groupID) {
 		return
