@@ -337,9 +337,11 @@ func (a *Agent) parseMessageContent(msg *onebot.GroupMessage) string {
 		}
 	}
 
-	qid := fmt.Sprintf("%d", msg.UserID)
-	if qid == a.cfg.Persona.QQ {
+	var qid string
+	if msg.UserID == a.cfg.Persona.QQ {
 		qid = "你"
+	} else {
+		qid = fmt.Sprintf("%d", msg.UserID)
 	}
 
 	// 构建完整消息行

@@ -8,7 +8,6 @@ import (
 	"mumu-bot/internal/llm"
 	"mumu-bot/internal/memory"
 	"mumu-bot/internal/tools"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -205,15 +204,7 @@ func (l *Learner) processGroup(groupID int64) {
 		batchSize = 100
 	}
 
-	// 过滤 Bot 自己的消息
-	botQQ := l.cfg.Persona.QQ
-	botID, err := strconv.ParseInt(botQQ, 10, 64)
-	if err != nil {
-		zap.L().Error("解析 Bot QQ 失败", zap.String("qq", botQQ), zap.Error(err))
-		return
-	}
-
-	msgs, err := l.memMgr.GetMessagesAfterID(groupID, botID, state.LastMessageID, batchSize)
+	msgs, err := l.memMgr.GetMessagesAfterID(groupID, l.cfg.Persona.QQ, state.LastMessageID, batchSize)
 	if err != nil {
 		zap.L().Error("获取消息失败", zap.Int64("group_id", groupID), zap.Error(err))
 		return
