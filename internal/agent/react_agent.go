@@ -168,7 +168,7 @@ func (a *Agent) initReact() error {
 	}
 	agent, err := react.NewAgent(context.Background(), &react.AgentConfig{
 		ToolCallingModel:   a.model,
-		ToolsConfig:        compose.ToolsNodeConfig{Tools: a.tools},
+		ToolsConfig:        compose.ToolsNodeConfig{Tools: a.tools, ExecuteSequentially: true},
 		MaxStep:            maxStep,
 		ToolReturnDirectly: map[string]struct{}{"stayQuiet": {}},
 	})
