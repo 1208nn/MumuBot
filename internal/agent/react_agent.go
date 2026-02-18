@@ -31,7 +31,6 @@ import (
 
 // Agent 沐沐智能体
 type Agent struct {
-	cfg            *config.Config
 	persona        *persona.Persona
 	memory         *memory.Manager
 	model          model.ToolCallingChatModel
@@ -60,7 +59,6 @@ type Agent struct {
 
 // New 创建 Agent
 func New(
-	cfg *config.Config,
 	p *persona.Persona,
 	mem *memory.Manager,
 	m model.ToolCallingChatModel,
@@ -68,7 +66,6 @@ func New(
 	bot *onebot.Client,
 ) (*Agent, error) {
 	a := &Agent{
-		cfg:               cfg,
 		persona:           p,
 		memory:            mem,
 		model:             m,
@@ -79,6 +76,7 @@ func New(
 		lastProcessedTime: make(map[int64]time.Time),
 		stopCh:            make(chan struct{}),
 	}
+	cfg := config.Get()
 
 	// 初始化并发管理器
 	a.concurrencyMgr = NewConcurrencyManager(cfg.Agent.MaxCoroutine, a.think)
@@ -87,7 +85,7 @@ func New(
 	a.jargonMgr = jargon.New(mem)
 
 	// 初始化后台学习系统
-	learner, err := learning.New(cfg, mem, a.jargonMgr)
+	learner, err := learning.New(mem, a.jargonMgr)
 	if err != nil {
 		zap.L().Error("初始化后台学习系统失败", zap.Error(err))
 	} else {
@@ -163,7 +161,8 @@ func (a *Agent) initTools() error {
 }
 
 func (a *Agent) initReact() error {
-	maxStep := a.cfg.Agent.MaxStep
+	cfg := config.Get()
+	maxStep := cfg.Agent.MaxStep
 	if maxStep <= 0 {
 		maxStep = 12 // 默认最大步数
 	}
@@ -206,7 +205,8 @@ func (a *Agent) Stop() {
 }
 
 func (a *Agent) onMessage(msg *onebot.GroupMessage) {
-	if !a.cfg.IsGroupEnabled(msg.GroupID) {
+	cfg := config.Get()
+	if !cfg.IsGroupEnabled(msg.GroupID) {
 		return
 	}
 
@@ -228,7 +228,7 @@ func (a *Agent) onMessage(msg *onebot.GroupMessage) {
 	// 防止注入工具名字
 	for _, t := range a.tools {
 		info, _ := t.Info(context.Background())
-		parsedContent = strings.ReplaceAll(parsedContent, info.Name, "")
+		parsedContent = strings.ReplaceAll(parsedContent, info.Name, "\"危险指令，已屏蔽\"")
 	}
 
 	a.addBuffer(msg)
@@ -302,7 +302,7 @@ func (a *Agent) parseMessageContent(msg *onebot.GroupMessage) string {
 				desc = img.Summary
 			}
 			// 自动保存表情包
-			if img.URL != "" && a.cfg.Sticker.AutoSave {
+			if img.URL != "" && config.Get().Sticker.AutoSave {
 				go a.autoSaveSticker(img.URL, desc)
 			}
 			if desc != "" {
@@ -338,7 +338,7 @@ func (a *Agent) parseMessageContent(msg *onebot.GroupMessage) string {
 	}
 
 	var qid string
-	if msg.UserID == a.cfg.Persona.QQ {
+	if msg.UserID == config.Get().Persona.QQ {
 		qid = "你"
 	} else {
 		qid = fmt.Sprintf("%d", msg.UserID)
@@ -354,7 +354,7 @@ func (a *Agent) addBuffer(msg *onebot.GroupMessage) {
 	buf, ok := a.buffers[msg.GroupID]
 	if !ok {
 		// 确保缓冲区大小有效
-		bufSize := a.cfg.Agent.MessageBufferSize
+		bufSize := config.Get().Agent.MessageBufferSize
 		if bufSize <= 0 {
 			bufSize = 15 // 默认缓冲区大小
 		}
@@ -393,7 +393,7 @@ func (a *Agent) updateMember(msg *onebot.GroupMessage) {
 
 func (a *Agent) thinkLoop() {
 	defer a.wg.Done()
-	ticker := time.NewTicker(time.Duration(a.cfg.Agent.ThinkInterval) * time.Second)
+	ticker := time.NewTicker(time.Duration(config.Get().Agent.ThinkInterval) * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -406,7 +406,8 @@ func (a *Agent) thinkLoop() {
 }
 
 func (a *Agent) thinkCycle() {
-	for _, gc := range a.cfg.Groups {
+	cfg := config.Get()
+	for _, gc := range cfg.Groups {
 		if !gc.Enabled {
 			continue
 		}
@@ -435,7 +436,7 @@ func (a *Agent) thinkCycle() {
 			continue
 		}
 
-		if time.Since(lastMsg.Time) > time.Duration(a.cfg.Agent.ObserveWindow)*time.Second {
+		if time.Since(lastMsg.Time) > time.Duration(cfg.Agent.ObserveWindow)*time.Second {
 			continue
 		}
 		// 获取当前的发言概率（考虑时段规则）
@@ -449,8 +450,9 @@ func (a *Agent) thinkCycle() {
 
 // getSpeakProbability 获取发言概率（考虑时段规则）
 func (a *Agent) getSpeakProbability(groupID int64) float64 {
-	baseProb := a.cfg.Chat.TalkFrequency
-	if !a.cfg.Chat.EnableTimeRules || len(a.cfg.Chat.TimeRules) == 0 {
+	cfg := config.Get()
+	baseProb := cfg.Chat.TalkFrequency
+	if !cfg.Chat.EnableTimeRules || len(cfg.Chat.TimeRules) == 0 {
 		return baseProb
 	}
 
@@ -459,7 +461,7 @@ func (a *Agent) getSpeakProbability(groupID int64) float64 {
 	minute := now.Minute()
 	currentMinutes := hour*60 + minute
 
-	for _, rule := range a.cfg.Chat.TimeRules {
+	for _, rule := range cfg.Chat.TimeRules {
 		// 检查是否适用于当前群（0表示全局）
 		if rule.GroupID != 0 && rule.GroupID != groupID {
 			continue
@@ -476,12 +478,52 @@ func (a *Agent) getSpeakProbability(groupID int64) float64 {
 		if startMinutes <= endMinutes {
 			// 正常时间范围
 			if currentMinutes >= startMinutes && currentMinutes < endMinutes {
-				return rule.TalkValue
+				baseProb = rule.TalkValue // 使用时段配置的概率覆盖基础概率
+				break                     // 找到匹配规则后跳出
 			}
 		} else {
 			// 跨午夜的时间范围
 			if currentMinutes >= startMinutes || currentMinutes < endMinutes {
-				return rule.TalkValue
+				baseProb = rule.TalkValue
+				break
+			}
+		}
+	}
+
+	// 防话痨限流逻辑
+	limitCfg := config.Get().Chat.RateLimit
+	if limitCfg.Enabled && limitCfg.PeriodSec > 0 && limitCfg.MaxMessages > 0 {
+		startTime := time.Now().Add(-time.Duration(limitCfg.PeriodSec) * time.Second)
+		count, err := a.memory.GetMessageCountByTime(groupID, a.bot.GetSelfID(), startTime)
+		if err == nil {
+			maxMsgs := float64(limitCfg.MaxMessages)
+			current := float64(count)
+
+			// 线性衰减系数
+			// 当 current=0, decay=1.0; 当 current=max, decay=0.0
+			var decay float64
+			if current >= maxMsgs {
+				decay = 0
+			} else {
+				decay = (maxMsgs - current) / maxMsgs
+			}
+
+			// 应用衰减
+			oldProb := baseProb
+			baseProb *= decay
+
+			// 最小保底检查
+			minProb := utils.ClampFloat64(limitCfg.MinProb, 0, 1)
+			baseProb = utils.ClampFloat64(baseProb, minProb, 1)
+
+			// 仅在触发衰减时打印日志
+			if decay < 1.0 {
+				zap.L().Debug("触发防话痨限制",
+					zap.Int64("group_id", groupID),
+					zap.Int64("recent_msgs", count),
+					zap.Float64("decay", decay),
+					zap.Float64("original_prob", oldProb),
+					zap.Float64("new_prob", baseProb))
 			}
 		}
 	}
@@ -535,7 +577,7 @@ func (a *Agent) think(groupID int64, isMention bool) {
 	}
 
 	// 主动记忆检索
-	if a.cfg.Agent.EnableActiveRetrieval {
+	if config.Get().Agent.EnableActiveRetrieval {
 		threshold := 0.7
 
 		// 获取上下文消息内容
@@ -579,7 +621,7 @@ func (a *Agent) think(groupID int64, isMention bool) {
 
 	// 添加群专属额外提示词
 	groupExtra := ""
-	if gc := a.cfg.GetGroupConfig(groupID); gc != nil && gc.ExtraPrompt != "" {
+	if gc := config.Get().GetGroupConfig(groupID); gc != nil && gc.ExtraPrompt != "" {
 		groupExtra = gc.ExtraPrompt
 	}
 
@@ -589,7 +631,7 @@ func (a *Agent) think(groupID int64, isMention bool) {
 	}
 
 	// 调试：显示系统提示词
-	if a.cfg.Debug.ShowPrompt {
+	if config.Get().Debug.ShowPrompt {
 		zap.L().Debug("系统提示词", zap.String("prompt", systemPrompt))
 		zap.L().Debug("思考提示词", zap.String("prompt", thinkPrompt))
 	}
@@ -615,7 +657,7 @@ func (a *Agent) think(groupID int64, isMention bool) {
 	}
 
 	// 记录 Agent 输出
-	if a.cfg.Debug.ShowThinking && result != nil && result.Content != "" {
+	if config.Get().Debug.ShowThinking && result != nil && result.Content != "" {
 		zap.L().Debug("Agent 输出", zap.Int64("group_id", groupID), zap.String("content", result.Content))
 	}
 }
@@ -670,8 +712,9 @@ func (a *Agent) getMemberInfo(groupID int64) string {
 // doSpeak 执行发言，返回消息ID
 func (a *Agent) doSpeak(groupID int64, content string, replyTo int64, mentions []int64) (int64, error) {
 	// 模拟打字延迟
-	if a.cfg.Chat.TypingSimulation {
-		typingSpeed := a.cfg.Chat.TypingSpeed
+	cfg := config.Get()
+	if cfg.Chat.TypingSimulation {
+		typingSpeed := cfg.Chat.TypingSpeed
 		if typingSpeed <= 0 {
 			typingSpeed = 6
 		}

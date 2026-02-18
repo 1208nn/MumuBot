@@ -21,7 +21,6 @@ import (
 )
 
 type Learner struct {
-	cfg       *config.Config
 	memMgr    *memory.Manager
 	jargonMgr *jargon.Manager
 	auxModel  model.ToolCallingChatModel
@@ -33,8 +32,8 @@ type Learner struct {
 	mu        sync.Mutex
 }
 
-func New(cfg *config.Config, memMgr *memory.Manager, jargonMgr *jargon.Manager) (*Learner, error) {
-	auxModel, err := llm.NewAuxClient(cfg)
+func New(memMgr *memory.Manager, jargonMgr *jargon.Manager) (*Learner, error) {
+	auxModel, err := llm.NewAuxClient()
 	if err != nil {
 		return nil, err
 	}
@@ -57,6 +56,7 @@ func New(cfg *config.Config, memMgr *memory.Manager, jargonMgr *jargon.Manager) 
 	}
 
 	// Initialize ReAct agent
+	cfg := config.Get()
 	maxStep := cfg.Learning.MaxStep
 	if maxStep <= 0 {
 		maxStep = 10
@@ -70,15 +70,20 @@ func New(cfg *config.Config, memMgr *memory.Manager, jargonMgr *jargon.Manager) 
 		return nil, fmt.Errorf("创建学习 Agent 失败: %w", err)
 	}
 
-	return &Learner{
-		cfg:       cfg,
+	l := &Learner{
 		memMgr:    memMgr,
 		jargonMgr: jargonMgr,
 		auxModel:  auxModel,
 		tools:     learningTools,
 		agent:     agent,
 		stopCh:    make(chan struct{}),
-	}, nil
+	}
+
+	// 启动后台任务
+	l.wg.Add(1)
+	go l.runLoop()
+
+	return l, nil
 }
 
 func (l *Learner) Start() {
@@ -110,9 +115,9 @@ func (l *Learner) Stop() {
 
 func (l *Learner) runLoop() {
 	defer l.wg.Done()
-
+	cfg := config.Get()
 	// Check interval
-	intervalMinutes := l.cfg.Learning.IntervalMinutes
+	intervalMinutes := cfg.Learning.IntervalMinutes
 	if intervalMinutes <= 0 {
 		intervalMinutes = 10
 	}
@@ -123,7 +128,7 @@ func (l *Learner) runLoop() {
 	go l.runTask()
 
 	// 启动定期审核任务
-	reviewIntervalMinutes := l.cfg.Learning.ReviewIntervalMinutes
+	reviewIntervalMinutes := cfg.Learning.ReviewIntervalMinutes
 	if reviewIntervalMinutes <= 0 {
 		reviewIntervalMinutes = 30
 	}
@@ -143,7 +148,8 @@ func (l *Learner) runLoop() {
 }
 
 func (l *Learner) runTask() {
-	for _, group := range l.cfg.Groups {
+	cfg := config.Get()
+	for _, group := range cfg.Groups {
 		if !group.Enabled {
 			continue
 		}
@@ -152,7 +158,8 @@ func (l *Learner) runTask() {
 }
 
 func (l *Learner) runReviewTask() {
-	for _, group := range l.cfg.Groups {
+	cfg := config.Get()
+	for _, group := range cfg.Groups {
 		if !group.Enabled {
 			continue
 		}
@@ -199,12 +206,13 @@ func (l *Learner) processGroup(groupID int64) {
 	}
 
 	// Fetch messages after last learned ID (limit batchSize)
-	batchSize := l.cfg.Learning.BatchSize
+	cfg := config.Get()
+	batchSize := cfg.Learning.BatchSize
 	if batchSize <= 0 {
 		batchSize = 100
 	}
 
-	msgs, err := l.memMgr.GetMessagesAfterID(groupID, l.cfg.Persona.QQ, state.LastMessageID, batchSize)
+	msgs, err := l.memMgr.GetMessagesAfterID(groupID, cfg.Persona.QQ, state.LastMessageID, batchSize)
 	if err != nil {
 		zap.L().Error("获取消息失败", zap.Int64("group_id", groupID), zap.Error(err))
 		return
@@ -220,7 +228,7 @@ func (l *Learner) processGroup(groupID int64) {
 		newLastID = msgs[len(msgs)-1].ID
 	}
 
-	minMsgCount := l.cfg.Learning.MinMsgCount
+	minMsgCount := cfg.Learning.MinMsgCount
 	if minMsgCount <= 0 {
 		minMsgCount = 5
 	}

@@ -78,6 +78,15 @@ type ChatConfig struct {
 	TypingSpeed      int              `yaml:"typing_speed"`      // 每秒打字速度（字符）
 	EnableTimeRules  bool             `yaml:"enable_time_rules"` // 是否启用时段规则
 	TimeRules        []TimeRuleConfig `yaml:"time_rules"`        // 时段发言频率规则
+	RateLimit        RateLimitConfig  `yaml:"rate_limit"`        // 频率限制配置
+}
+
+// RateLimitConfig 频率限制配置
+type RateLimitConfig struct {
+	Enabled     bool    `yaml:"enabled"`      // 是否启用
+	PeriodSec   int     `yaml:"period_sec"`   // 统计周期（秒）
+	MaxMessages int     `yaml:"max_messages"` // 最大消息数
+	MinProb     float64 `yaml:"min_prob"`     // 最小保底概率（默认0.1）
 }
 
 // TimeRuleConfig 时段规则配置

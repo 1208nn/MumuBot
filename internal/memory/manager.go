@@ -23,15 +23,15 @@ type EmbeddingProvider interface {
 // Manager 记忆系统管理器
 type Manager struct {
 	db          *gorm.DB
-	cfg         *config.Config
 	embedding   EmbeddingProvider
 	milvus      *vector.MilvusClient // Milvus 向量存储
 	cleanupStop chan struct{}
 }
 
 // NewManager 创建记忆管理器
-func NewManager(cfg *config.Config, embedding EmbeddingProvider) (*Manager, error) {
+func NewManager(embedding EmbeddingProvider) (*Manager, error) {
 	// 构建 MySQL DSN
+	cfg := config.Get()
 	mysqlCfg := cfg.Memory.MySQL
 	if mysqlCfg.Host == "" {
 		mysqlCfg.Host = "127.0.0.1"
@@ -91,7 +91,6 @@ func NewManager(cfg *config.Config, embedding EmbeddingProvider) (*Manager, erro
 
 	m := &Manager{
 		db:          db,
-		cfg:         cfg,
 		embedding:   embedding,
 		milvus:      milvusClient,
 		cleanupStop: make(chan struct{}),
@@ -135,6 +134,15 @@ func (m *Manager) GetMessagesAfterID(groupID int64, selfID int64, lastID uint, l
 	err := m.db.Where("group_id = ? AND id > ? AND user_id != ?", groupID, lastID, selfID).
 		Order("id ASC").Limit(limit).Find(&dbMsgs).Error
 	return dbMsgs, err
+}
+
+// GetMessageCountByTime 获取指定用户在指定群组一段时间内的消息数量
+func (m *Manager) GetMessageCountByTime(groupID, userID int64, startTime time.Time) (int64, error) {
+	var count int64
+	err := m.db.Model(&MessageLog{}).
+		Where("group_id = ? AND user_id = ? AND created_at >= ?", groupID, userID, startTime).
+		Count(&count).Error
+	return count, err
 }
 
 // ==================== 长期记忆 ====================
@@ -271,11 +279,7 @@ func (m *Manager) QueryMemory(ctx context.Context, query string, groupID int64, 
 
 // startMessageLogCleanup 启动消息日志清理定时任务
 func (m *Manager) startMessageLogCleanup() {
-	if m == nil || m.cfg == nil {
-		return
-	}
-
-	cleanupCfg := m.cfg.Memory.MessageLogCleanup
+	cleanupCfg := config.Get().Memory.MessageLogCleanup
 	enabled := true
 	if cleanupCfg.Enabled != nil {
 		enabled = *cleanupCfg.Enabled

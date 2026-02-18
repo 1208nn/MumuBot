@@ -12,12 +12,12 @@ import (
 
 // VisionClient 多模态视觉模型客户端
 type VisionClient struct {
-	cfg   *config.VisionLLMConfig
 	model *openai.ChatModel
 }
 
 // NewVisionClient 创建视觉模型客户端
-func NewVisionClient(cfg *config.VisionLLMConfig) (*VisionClient, error) {
+func NewVisionClient() (*VisionClient, error) {
+	cfg := config.Get().VisionLLM
 	if !cfg.Enabled {
 		return nil, nil
 	}
@@ -33,7 +33,6 @@ func NewVisionClient(cfg *config.VisionLLMConfig) (*VisionClient, error) {
 	}
 
 	return &VisionClient{
-		cfg:   cfg,
 		model: model,
 	}, nil
 }

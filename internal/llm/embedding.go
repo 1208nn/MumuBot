@@ -11,12 +11,12 @@ import (
 
 // EmbeddingClient 向量嵌入客户端
 type EmbeddingClient struct {
-	cfg    *config.Config
 	client *openai.Embedder
 }
 
 // NewEmbeddingClient 创建 Embedding 客户端
-func NewEmbeddingClient(cfg *config.Config) (*EmbeddingClient, error) {
+func NewEmbeddingClient() (*EmbeddingClient, error) {
+	cfg := config.Get()
 	// 检查是否启用
 	if !cfg.Embedding.Enabled {
 		return nil, nil
@@ -35,7 +35,6 @@ func NewEmbeddingClient(cfg *config.Config) (*EmbeddingClient, error) {
 	}
 
 	return &EmbeddingClient{
-		cfg:    cfg,
 		client: embedder,
 	}, nil
 }

@@ -37,14 +37,14 @@ func main() {
 	zap.L().Info("配置已加载", zap.String("path", configPath))
 
 	// 创建 Embedding 客户端
-	embeddingClient, err := llm.NewEmbeddingClient(cfg)
+	embeddingClient, err := llm.NewEmbeddingClient()
 	if err != nil {
 		zap.L().Error("Embedding 客户端创建失败，向量检索不可用", zap.Error(err))
 		embeddingClient = nil
 	}
 
 	// 创建记忆管理器
-	memoryMgr, err := memory.NewManager(cfg, embeddingClient)
+	memoryMgr, err := memory.NewManager(embeddingClient)
 	if err != nil {
 		zap.L().Fatal("记忆管理器创建失败", zap.Error(err))
 	}
@@ -52,7 +52,7 @@ func main() {
 	zap.L().Info("记忆系统已初始化")
 
 	// 创建 LLM 客户端
-	llmClient, err := llm.NewClient(cfg)
+	llmClient, err := llm.NewClient()
 	if err != nil {
 		zap.L().Fatal("LLM 客户端创建失败", zap.Error(err))
 	}
@@ -61,7 +61,8 @@ func main() {
 	// 创建 Vision 客户端（多模态视觉理解）
 	var visionClient *llm.VisionClient
 	if cfg.VisionLLM.Enabled {
-		visionClient, err = llm.NewVisionClient(&cfg.VisionLLM)
+		var err error
+		visionClient, err = llm.NewVisionClient()
 		if err != nil {
 			zap.L().Error("Vision 客户端创建失败，视觉理解不可用", zap.Error(err))
 		} else {
@@ -70,7 +71,7 @@ func main() {
 	}
 
 	// 创建 OneBot 客户端
-	botClient := onebot.NewClient(cfg)
+	botClient := onebot.NewClient()
 	if err := botClient.Connect(); err != nil {
 		zap.L().Fatal("OneBot 连接失败", zap.Error(err))
 	}
@@ -84,14 +85,14 @@ func main() {
 	chatModel := llmClient.GetModel()
 
 	// 创建 Agent
-	mumuAgent, err := agent.New(cfg, mumuPersona, memoryMgr, chatModel, visionClient, botClient)
+	mumuAgent, err := agent.New(mumuPersona, memoryMgr, chatModel, visionClient, botClient)
 	if err != nil {
 		zap.L().Fatal("Agent 创建失败", zap.Error(err))
 	}
 	mumuAgent.Start()
 
 	// 启动HTTP服务（用于健康检查等）
-	httpServer := server.NewServer(cfg, memoryMgr)
+	httpServer := server.NewServer(memoryMgr)
 	go httpServer.Start()
 
 	// 等待退出信号

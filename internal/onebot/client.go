@@ -17,7 +17,6 @@ import (
 
 // Client OneBot WebSocket客户端
 type Client struct {
-	cfg      *config.Config
 	conn     *websocket.Conn
 	connMu   sync.Mutex
 	handlers map[string][]EventHandler
@@ -199,9 +198,8 @@ type LoginInfo struct {
 }
 
 // NewClient 创建OneBot客户端
-func NewClient(cfg *config.Config) *Client {
+func NewClient() *Client {
 	return &Client{
-		cfg:        cfg,
 		handlers:   make(map[string][]EventHandler),
 		stopCh:     make(chan struct{}),
 		mutedUntil: make(map[int64]time.Time),
@@ -213,12 +211,13 @@ func (c *Client) Connect() error {
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
 
+	cfg := config.Get()
 	header := make(map[string][]string)
-	if c.cfg.OneBot.AccessToken != "" {
-		header["Authorization"] = []string{"Bearer " + c.cfg.OneBot.AccessToken}
+	if cfg.OneBot.AccessToken != "" {
+		header["Authorization"] = []string{"Bearer " + cfg.OneBot.AccessToken}
 	}
 
-	conn, _, err := websocket.DefaultDialer.Dial(c.cfg.OneBot.WsURL, header)
+	conn, _, err := websocket.DefaultDialer.Dial(cfg.OneBot.WsURL, header)
 	if err != nil {
 		return fmt.Errorf("WebSocket连接失败: %w", err)
 	}
@@ -229,7 +228,7 @@ func (c *Client) Connect() error {
 	// 启动消息接收循环
 	go c.receiveLoop()
 
-	zap.L().Info("已连接到 OneBot", zap.String("url", c.cfg.OneBot.WsURL))
+	zap.L().Info("已连接到 OneBot", zap.String("url", cfg.OneBot.WsURL))
 	return nil
 }
 
@@ -979,7 +978,7 @@ func (c *Client) handleDisconnect() {
 
 	zap.L().Warn("连接断开，尝试重连...")
 
-	interval := time.Duration(c.cfg.OneBot.ReconnectInterval) * time.Second
+	interval := time.Duration(config.Get().OneBot.ReconnectInterval) * time.Second
 	for {
 		select {
 		case <-c.stopCh:

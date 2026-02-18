@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"mumu-bot/internal/config"
 	"mumu-bot/internal/llm"
 	"mumu-bot/internal/memory"
 	"strings"
@@ -64,8 +63,7 @@ func saveMemoryFunc(ctx context.Context, input *SaveMemoryInput) (*SaveMemoryOut
 	similarMems, err := tc.MemoryMgr.SearchSimilarMemories(ctx, input.Content, tc.GroupID, 0.85)
 	if err == nil && len(similarMems) > 0 {
 		// 调用辅助模型进行合并
-		cfg := config.Get()
-		auxModel, err := llm.NewAuxClient(cfg)
+		auxModel, err := llm.NewAuxClient()
 		if err == nil {
 			var oldContents []string
 			for _, m := range similarMems {

@@ -23,13 +23,13 @@ var (
 
 // Client LLM 客户端
 type Client struct {
-	cfg       *config.Config
 	chatModel model.ToolCallingChatModel
 }
 
 // NewClient 创建 LLM 客户端（单例）
-func NewClient(cfg *config.Config) (*Client, error) {
+func NewClient() (*Client, error) {
 	defaultClientOnce.Do(func() {
+		cfg := config.Get()
 		ctx := context.Background()
 
 		// 使用 Eino 的 OpenAI 兼容客户端
@@ -45,7 +45,6 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		}
 
 		defaultClient = &Client{
-			cfg:       cfg,
 			chatModel: chatModel,
 		}
 	})
@@ -54,8 +53,9 @@ func NewClient(cfg *config.Config) (*Client, error) {
 }
 
 // NewAuxClient 创建辅助 LLM 客户端（单例）
-func NewAuxClient(cfg *config.Config) (model.ToolCallingChatModel, error) {
+func NewAuxClient() (model.ToolCallingChatModel, error) {
 	auxClientOnce.Do(func() {
+		cfg := config.Get()
 		ctx := context.Background()
 
 		// 使用 AuxiliaryModel 配置

@@ -15,22 +15,21 @@ import (
 
 // Server HTTP服务
 type Server struct {
-	cfg       *config.Config
 	memoryMgr *memory.Manager
 	server    *http.Server
 }
 
 // NewServer 创建HTTP服务
-func NewServer(cfg *config.Config, memoryMgr *memory.Manager) *Server {
+func NewServer(memoryMgr *memory.Manager) *Server {
 	return &Server{
-		cfg:       cfg,
 		memoryMgr: memoryMgr,
 	}
 }
 
 // Start 启动HTTP服务
 func (s *Server) Start() {
-	if !s.cfg.App.Debug {
+	cfg := config.Get()
+	if !cfg.App.Debug {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
@@ -61,7 +60,7 @@ func (s *Server) Start() {
 		api.GET("/status", s.getStatus)
 	}
 
-	addr := fmt.Sprintf("%s:%d", s.cfg.Server.Host, s.cfg.Server.Port)
+	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	s.server = &http.Server{
 		Addr:    addr,
 		Handler: r,
@@ -221,17 +220,18 @@ func (s *Server) getStats(c *gin.Context) {
 // getStatus 获取状态
 func (s *Server) getStatus(c *gin.Context) {
 	stats := s.memoryMgr.GetStats()
+	cfg := config.Get()
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "running",
-		"persona": s.cfg.Persona.Name,
-		"groups":  len(s.cfg.Groups),
+		"persona": cfg.Persona.Name,
+		"groups":  len(cfg.Groups),
 		"uptime":  time.Now().Format(time.RFC3339),
 		"stats":   stats,
 		"config": gin.H{
-			"think_interval": s.cfg.Agent.ThinkInterval,
-			"observe_window": s.cfg.Agent.ObserveWindow,
-			"llm_model":      s.cfg.LLM.Model,
+			"think_interval": cfg.Agent.ThinkInterval,
+			"observe_window": cfg.Agent.ObserveWindow,
+			"llm_model":      cfg.LLM.Model,
 		},
 	})
 }

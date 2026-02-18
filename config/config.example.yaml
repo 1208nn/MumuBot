@@ -68,6 +68,13 @@ chat:
       group_id: 0           # 0表示全局
       talk_value: 0.2       # 夜间降低发言频率
 
+  # 防话痨频率限制
+  rate_limit:
+    enabled: true           # 是否启用
+    period_sec: 300         # 统计周期（秒）
+    max_messages: 30        # 周期内最大消息数（超过后概率降至最低）
+    min_prob: 0.1           # 最小保底概率（即使刷屏也保留 0.1 的插话概率）
+
 # 学习系统配置
 learning:
   enabled: true                 # 是否启用
