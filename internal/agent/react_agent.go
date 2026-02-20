@@ -16,6 +16,7 @@ import (
 	"mumu-bot/internal/tools"
 	"mumu-bot/internal/utils"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -184,10 +185,69 @@ func (a *Agent) Start() {
 	if a.learner != nil {
 		a.learner.Start()
 	}
+
+	// 启动时从数据库加载历史消息到缓冲区
+	a.loadBuffersFromDB()
+
 	a.bot.OnMessage(a.onMessage)
 	a.wg.Add(1)
 	go a.thinkLoop()
 	zap.L().Info("Agent 已启动")
+}
+
+// loadBuffersFromDB 从数据库加载消息日志到缓冲区
+func (a *Agent) loadBuffersFromDB() {
+	cfg := config.Get()
+	for _, gc := range cfg.Groups {
+		if !gc.Enabled {
+			continue
+		}
+
+		// 获取缓冲区大小
+		bufSize := cfg.Agent.MessageBufferSize
+		if bufSize <= 0 {
+			bufSize = 15
+		}
+
+		// 从数据库获取最近的消息
+		logs := a.memory.GetRecentMessages(gc.GroupID, bufSize, 0)
+		if len(logs) == 0 {
+			continue
+		}
+
+		// 初始化缓冲区
+		a.buffersMu.Lock()
+		buf := utils.NewRingBuffer[*onebot.GroupMessage](bufSize)
+		a.buffers[gc.GroupID] = buf
+
+		// 填充缓冲区
+		for _, log := range logs {
+			msgID, _ := strconv.ParseInt(log.MessageID, 10, 64)
+
+			// 还原合并转发内容
+			var forwards []onebot.ForwardMessage
+			if log.Forwards != "" {
+				_ = sonic.UnmarshalString(log.Forwards, &forwards)
+			}
+
+			msg := &onebot.GroupMessage{
+				MessageID:    msgID,
+				GroupID:      log.GroupID,
+				UserID:       log.UserID,
+				Nickname:     log.Nickname,
+				Content:      log.Content, // 这里使用解析后的内容作为 Content
+				FinalContent: log.Content, // FinalContent 也是解析后的内容
+				IsMentioned:  log.IsMentioned,
+				Time:         log.CreatedAt,
+				MessageType:  log.MsgType,
+				Forwards:     forwards,
+			}
+			buf.Push(msg)
+		}
+		a.buffersMu.Unlock()
+
+		zap.L().Info("已从数据库加载消息历史", zap.Int64("group_id", gc.GroupID), zap.Int("count", len(logs)))
+	}
 }
 
 // Stop 停止
