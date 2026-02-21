@@ -513,40 +513,39 @@ func (a *Agent) thinkCycle() {
 func (a *Agent) getSpeakProbability(groupID int64) float64 {
 	cfg := config.Get()
 	baseProb := cfg.Chat.TalkFrequency
-	if !cfg.Chat.EnableTimeRules || len(cfg.Chat.TimeRules) == 0 {
-		return baseProb
-	}
+	// 如果启用了时段规则，则根据当前时间调整概率
+	if cfg.Chat.EnableTimeRules && len(cfg.Chat.TimeRules) > 0 {
+		now := time.Now()
+		hour := now.Hour()
+		minute := now.Minute()
+		currentMinutes := hour*60 + minute
 
-	now := time.Now()
-	hour := now.Hour()
-	minute := now.Minute()
-	currentMinutes := hour*60 + minute
-
-	for _, rule := range cfg.Chat.TimeRules {
-		// 检查是否适用于当前群（0表示全局）
-		if rule.GroupID != 0 && rule.GroupID != groupID {
-			continue
-		}
-		// 解析时间范围
-		var startHour, startMin, endHour, endMin int
-		if _, err := fmt.Sscanf(rule.TimeRange, "%d:%d-%d:%d", &startHour, &startMin, &endHour, &endMin); err != nil {
-			continue
-		}
-		startMinutes := startHour*60 + startMin
-		endMinutes := endHour*60 + endMin
-
-		// 检查当前时间是否在范围内
-		if startMinutes <= endMinutes {
-			// 正常时间范围
-			if currentMinutes >= startMinutes && currentMinutes < endMinutes {
-				baseProb = rule.TalkValue // 使用时段配置的概率覆盖基础概率
-				break                     // 找到匹配规则后跳出
+		for _, rule := range cfg.Chat.TimeRules {
+			// 检查是否适用于当前群（0表示全局）
+			if rule.GroupID != 0 && rule.GroupID != groupID {
+				continue
 			}
-		} else {
-			// 跨午夜的时间范围
-			if currentMinutes >= startMinutes || currentMinutes < endMinutes {
-				baseProb = rule.TalkValue
-				break
+			// 解析时间范围
+			var startHour, startMin, endHour, endMin int
+			if _, err := fmt.Sscanf(rule.TimeRange, "%d:%d-%d:%d", &startHour, &startMin, &endHour, &endMin); err != nil {
+				continue
+			}
+			startMinutes := startHour*60 + startMin
+			endMinutes := endHour*60 + endMin
+
+			// 检查当前时间是否在范围内
+			if startMinutes <= endMinutes {
+				// 正常时间范围
+				if currentMinutes >= startMinutes && currentMinutes < endMinutes {
+					baseProb = rule.TalkValue // 使用时段配置的概率覆盖基础概率
+					break                     // 找到匹配规则后跳出
+				}
+			} else {
+				// 跨午夜的时间范围
+				if currentMinutes >= startMinutes || currentMinutes < endMinutes {
+					baseProb = rule.TalkValue
+					break
+				}
 			}
 		}
 	}
