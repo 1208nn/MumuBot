@@ -14,7 +14,6 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
-	github.com/6tail/lunar-go v1.4.6 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
@@ -157,6 +156,7 @@ require (
 )
 
 require (
+	github.com/6tail/lunar-go v1.4.6
 	github.com/bytedance/sonic v1.15.0
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260129100151-33cdd47ff03a
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.8

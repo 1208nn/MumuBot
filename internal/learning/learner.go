@@ -240,7 +240,10 @@ func (l *Learner) processGroup(groupID int64) {
 	// 构建提示词
 	var chatLog strings.Builder
 	for _, m := range msgs {
-		chatLog.WriteString(fmt.Sprintf("%s: %s\n", m.Nickname, m.Content))
+		if m.OriginalContent == "" {
+			continue
+		}
+		chatLog.WriteString(fmt.Sprintf("%s: %s\n", m.Nickname, m.OriginalContent))
 	}
 
 	// 注入已知的黑话/梗（避免重复学习）

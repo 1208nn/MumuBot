@@ -235,8 +235,8 @@ func (a *Agent) loadBuffersFromDB() {
 				GroupID:      log.GroupID,
 				UserID:       log.UserID,
 				Nickname:     log.Nickname,
-				Content:      log.Content, // 这里使用解析后的内容作为 Content
-				FinalContent: log.Content, // FinalContent 也是解析后的内容
+				Content:      log.OriginalContent,
+				FinalContent: log.Content,
 				IsMentioned:  log.IsMentioned,
 				Time:         log.CreatedAt,
 				MessageType:  log.MsgType,
@@ -293,15 +293,16 @@ func (a *Agent) onMessage(msg *onebot.GroupMessage) {
 
 	a.addBuffer(msg)
 	_ = a.memory.AddMessage(memory.MessageLog{
-		MessageID:   fmt.Sprintf("%d", msg.MessageID),
-		GroupID:     msg.GroupID,
-		UserID:      msg.UserID,
-		Nickname:    msg.Nickname,
-		Content:     parsedContent, // 使用解析后的内容
-		MsgType:     msg.MessageType,
-		IsMentioned: isMentioned,
-		CreatedAt:   msg.Time,
-		Forwards:    forwardsJSON,
+		MessageID:       fmt.Sprintf("%d", msg.MessageID),
+		GroupID:         msg.GroupID,
+		UserID:          msg.UserID,
+		Nickname:        msg.Nickname,
+		Content:         msg.FinalContent, // 使用解析后的内容
+		OriginalContent: msg.Content,
+		MsgType:         msg.MessageType,
+		IsMentioned:     isMentioned,
+		CreatedAt:       msg.Time,
+		Forwards:        forwardsJSON,
 	})
 
 	if msg.UserID == a.bot.GetSelfID() {
@@ -366,7 +367,7 @@ func (a *Agent) parseMessageContent(msg *onebot.GroupMessage) string {
 				go a.autoSaveSticker(img.URL, desc)
 			}
 			if desc != "" {
-				content += fmt.Sprintf(" [表情包 描述:%s]", desc)
+				content += fmt.Sprintf(" [表情包:%s]", desc)
 			} else {
 				content += " [表情包]"
 			}
@@ -644,7 +645,10 @@ func (a *Agent) think(groupID int64, isMention bool) {
 		msgs := a.getBuffer(groupID)
 		var contentBuilder strings.Builder
 		for _, m := range msgs {
-			contentBuilder.WriteString(m.Content) // 使用语义内容字段
+			if m.Content == "" {
+				continue
+			}
+			contentBuilder.WriteString(m.Content)
 		}
 
 		// 向量搜索
@@ -828,9 +832,12 @@ func (a *Agent) doSendSticker(groupID int64, filePath string, description string
 		GroupID:     groupID,
 		UserID:      a.bot.GetSelfID(),
 		Nickname:    a.persona.GetName(),
-		Content:     content,
+		Content:     "",
 		Time:        time.Now(),
 		MessageType: "group",
+		Images: []onebot.ImageInfo{
+			{Summary: content, SubType: 1},
+		},
 	}
 	a.onMessage(msg)
 	zap.L().Info("发送表情包成功", zap.Int64("group_id", groupID), zap.String("desc", description))
