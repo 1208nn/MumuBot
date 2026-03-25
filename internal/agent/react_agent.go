@@ -49,6 +49,10 @@ type Agent struct {
 	buffers   map[int64]*utils.RingBuffer[*onebot.GroupMessage]
 	buffersMu sync.RWMutex // 保护 map 本身的并发访问
 
+	// 思考聚合窗口
+	pendingThinks map[int64]*pendingThink
+	pendingMu     sync.Mutex
+
 	// 正在处理中的群组（防止重复思考）和最后处理时间
 	processing        map[int64]bool
 	lastProcessedTime map[int64]time.Time
@@ -56,6 +60,12 @@ type Agent struct {
 
 	stopCh chan struct{}
 	wg     sync.WaitGroup
+}
+
+type pendingThink struct {
+	timer      *time.Timer
+	isMention  bool
+	generation uint64
 }
 
 // New 创建 Agent
@@ -73,6 +83,7 @@ func New(
 		vision:            vision,
 		bot:               bot,
 		buffers:           make(map[int64]*utils.RingBuffer[*onebot.GroupMessage]),
+		pendingThinks:     make(map[int64]*pendingThink),
 		processing:        make(map[int64]bool),
 		lastProcessedTime: make(map[int64]time.Time),
 		stopCh:            make(chan struct{}),
@@ -256,6 +267,7 @@ func (a *Agent) Stop() {
 		a.learner.Stop()
 	}
 	close(a.stopCh)
+	a.clearPendingThinks()
 	a.wg.Wait()
 	// 关闭 MCP 连接
 	if a.mcpMgr != nil {
@@ -311,10 +323,7 @@ func (a *Agent) onMessage(msg *onebot.GroupMessage) {
 
 	go a.updateMember(msg)
 
-	// 如果被 @ 了，立即触发一次思考（跳过等待）
-	if isMentioned {
-		go a.concurrencyMgr.Submit(msg.GroupID, true)
-	}
+	a.scheduleThink(msg.GroupID, isMentioned, false)
 }
 
 // parseMessageContent 解析消息内容（图片、视频、表情、回复等）
@@ -492,7 +501,7 @@ func (a *Agent) thinkCycle() {
 			continue
 		}
 
-		// 如果最后一条消息是 @提及，已经在 onMessage 中触发了即时思考，这里跳过
+		// 如果最后一条消息是 @提及，已经在 onMessage 中触发了思考，这里跳过
 		if a.persona.IsMentioned(lastMsg.Content) || lastMsg.IsMentioned {
 			continue
 		}
@@ -505,7 +514,64 @@ func (a *Agent) thinkCycle() {
 		if rand.Float64() > speakProb {
 			continue
 		}
-		a.concurrencyMgr.Submit(gc.GroupID, false)
+		a.scheduleThink(gc.GroupID, false, true)
+	}
+}
+
+func (a *Agent) scheduleThink(groupID int64, isMention bool, fromLoop bool) {
+	debounce := time.Duration(config.Get().Agent.ThinkDebounceMS) * time.Millisecond
+
+	a.pendingMu.Lock()
+	defer a.pendingMu.Unlock()
+	if pending, ok := a.pendingThinks[groupID]; ok {
+		pending.isMention = pending.isMention || isMention
+		pending.generation++
+		gen := pending.generation
+		pending.timer = time.AfterFunc(debounce, func() {
+			a.flushPendingThink(groupID, gen)
+		})
+		return
+	}
+
+	if !fromLoop && !isMention {
+		return
+	}
+
+	pending := &pendingThink{
+		isMention:  isMention,
+		generation: 1,
+	}
+	gen := pending.generation
+	pending.timer = time.AfterFunc(debounce, func() {
+		a.flushPendingThink(groupID, gen)
+	})
+	a.pendingThinks[groupID] = pending
+}
+
+func (a *Agent) flushPendingThink(groupID int64, generation uint64) {
+	a.pendingMu.Lock()
+	pending, ok := a.pendingThinks[groupID]
+	if !ok || pending.generation != generation {
+		a.pendingMu.Unlock()
+		return
+	}
+
+	isMention := pending.isMention
+	delete(a.pendingThinks, groupID)
+	a.pendingMu.Unlock()
+
+	a.concurrencyMgr.Submit(groupID, isMention)
+}
+
+func (a *Agent) clearPendingThinks() {
+	a.pendingMu.Lock()
+	defer a.pendingMu.Unlock()
+
+	for groupID, pending := range a.pendingThinks {
+		if pending.timer != nil {
+			pending.timer.Stop()
+		}
+		delete(a.pendingThinks, groupID)
 	}
 }
 

@@ -65,6 +65,7 @@ type GroupConfig struct {
 type AgentConfig struct {
 	ObserveWindow         int  `yaml:"observe_window"`          // 观察窗口时间（秒）
 	ThinkInterval         int  `yaml:"think_interval"`          // 决策间隔（秒）
+	ThinkDebounceMS       int  `yaml:"think_debounce_ms"`       // 思考聚合窗口（毫秒）
 	MessageBufferSize     int  `yaml:"message_buffer_size"`     // 消息缓冲区大小
 	MaxStep               int  `yaml:"max_step"`                // ReAct 最大步数
 	MaxCoroutine          int  `yaml:"max_coroutine"`           // 最大并发思考进程数（0表示不限制）
