@@ -13,7 +13,7 @@ import (
 // ==================== 搜索表情包工具 ====================
 
 type SearchStickersInput struct {
-	Keyword string `json:"keyword" jsonschema:"description=按描述关键词搜索，如：猫、开心、无语等"`
+	Keyword string `json:"keyword" jsonschema:"description=按关键词搜索，如：猫、开心、无语等，关键词之间用空格隔开"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"description=返回数量，默认10"`
 }
 
@@ -70,7 +70,7 @@ func searchStickersFunc(ctx context.Context, input *SearchStickersInput) (*Searc
 func NewSearchStickersTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"searchStickers",
-		"通过关键词搜索已保存的表情包，关键词用空格隔开。",
+		"搜索已保存的表情包。",
 		searchStickersFunc,
 	)
 }

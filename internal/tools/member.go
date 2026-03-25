@@ -48,7 +48,7 @@ type UpdateMemberProfileInput struct {
 	// CommonWords 常用词汇或口头禅
 	CommonWords []string `json:"common_words,omitempty" jsonschema:"description=常用词汇或口头禅（只传入新增的项）"`
 	// IntimacyDelta 亲密度变化值 -0.3 到 0.3
-	IntimacyDelta *float64 `json:"intimacy_delta,omitempty" jsonschema:"description=亲密度变化值，范围 -0.3 到 0.3，正数表示增加亲密度，负数表示降低亲密度"`
+	IntimacyDelta float64 `json:"intimacy_delta,omitempty" jsonschema:"minimum=-0.3,maximum=0.3,description=亲密度变化值(-0.3到0.3)，正数表示增加亲密度，负数表示降低亲密度"`
 }
 
 // UpdateMemberProfileOutput 更新成员画像的输出
@@ -102,11 +102,9 @@ func updateMemberProfileFunc(ctx context.Context, input *UpdateMemberProfileInpu
 		b, _ := sonic.MarshalString(mergedCommonWords)
 		profile.CommonWords = b
 	}
-	if input.IntimacyDelta != nil {
-		// 限制变化值在 -0.3 到 0.3 范围内
-		delta := mutils.ClampFloat64(*input.IntimacyDelta, -0.3, 0.3)
-		profile.Intimacy = mutils.ClampFloat64(profile.Intimacy+delta, 0, 1)
-	}
+
+	delta := input.IntimacyDelta
+	profile.Intimacy = mutils.ClampFloat64(profile.Intimacy+delta, 0, 1)
 
 	if err := tc.MemoryMgr.UpdateMemberProfile(profile); err != nil {
 		output := &UpdateMemberProfileOutput{Success: false, Message: err.Error()}

@@ -22,9 +22,9 @@ type SaveMemoryInput struct {
 	// Content 要记住的内容，用自然语言描述
 	Content string `json:"content" jsonschema:"description=要记住的内容，用自然语言描述清楚"`
 	// Importance 重要性评分，0-1之间
-	Importance float64 `json:"importance,omitempty" jsonschema:"description=重要性评分(0-1)，越重要越高"`
+	Importance float64 `json:"importance,omitempty" jsonschema:"minimum=0,maximum=1,description=重要性评分(0-1)，越重要越高"`
 	// RelatedUserID 相关的用户ID（可选）
-	RelatedUserID int64 `json:"related_user_id,omitempty" jsonschema:"description=如果这条记忆与某个群友相关，填写其QQ号"`
+	RelatedUserID int64 `json:"related_user_id,omitempty" jsonschema:"description=如果这条记忆与某个群友相关，填写其QQ号，否则填0"`
 }
 
 // SaveMemoryOutput 保存记忆的输出
@@ -54,11 +54,6 @@ func saveMemoryFunc(ctx context.Context, input *SaveMemoryInput) (*SaveMemoryOut
 		return &SaveMemoryOutput{Success: false, Message: "无效的记忆类型，可选: group_fact, self_experience, conversation"}, nil
 	}
 
-	importance := input.Importance
-	if importance <= 0 || importance > 1 {
-		importance = 0.5
-	}
-
 	// 向量相似度搜索
 	similarMems, err := tc.MemoryMgr.SearchSimilarMemories(ctx, input.Content, tc.GroupID, 0.85)
 	if err == nil && len(similarMems) > 0 {
@@ -70,7 +65,7 @@ func saveMemoryFunc(ctx context.Context, input *SaveMemoryInput) (*SaveMemoryOut
 				oldContents = append(oldContents, fmt.Sprintf("- %s", m.Content))
 			}
 
-			prompt := fmt.Sprintf(`你是一个记忆管理员。用户试图保存一条新记忆，但发现与现有的记忆高度相似。
+			prompt := fmt.Sprintf(`你是一个 Agent 记忆管理员。现在模型试图保存一条新记忆，但发现与现有的记忆高度相似。
 请将新记忆与旧记忆合并，生成一条更完整、准确的记忆。
 
 旧记忆：
@@ -116,7 +111,7 @@ func saveMemoryFunc(ctx context.Context, input *SaveMemoryInput) (*SaveMemoryOut
 		GroupID:    tc.GroupID,
 		UserID:     input.RelatedUserID,
 		Content:    input.Content,
-		Importance: importance,
+		Importance: input.Importance,
 	}
 
 	if err := tc.MemoryMgr.SaveMemory(ctx, mem); err != nil {
@@ -148,9 +143,9 @@ func NewSaveMemoryTool() (tool.InvokableTool, error) {
 // QueryMemoryInput 查询记忆的输入参数
 type QueryMemoryInput struct {
 	// Query 搜索关键词或描述
-	Query string `json:"query" jsonschema:"description=搜索关键词或描述"`
+	Query string `json:"query" jsonschema:"description=搜索关键词或自然语言描述"`
 	// Type 限定记忆类型（可选）
-	Type string `json:"type,omitempty" jsonschema:"enum=group_fact,enum=self_experience,enum=conversation,description=限定记忆类型（空字符串时不筛选）"`
+	Type string `json:"type,omitempty" jsonschema:"enum=,enum=group_fact,enum=self_experience,enum=conversation,description=筛选记忆类型（空字符串时不筛选）"`
 	// Scoped 是否只搜索当前聊天群的记忆
 	Scoped bool `json:"scoped,omitempty" jsonschema:"description=是否只搜索当前聊天群的记忆，默认false"`
 	// Limit 返回结果数量限制，默认10，最大50

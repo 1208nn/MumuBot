@@ -70,9 +70,9 @@ func NewSpeakTool() (tool.InvokableTool, error) {
 - speak每次只能发送**一条**消息，不要把多句话合在一起；如果要说多句话，请多次调用speak
 - 不要用分号、句号或换行符连接多个独立的句子
 - 正确示例：speak("你好")，再调用speak("今天天气真好")
-- 错误示例：speak("你好。今天天气真好") 或 speak("你好\n今天天气真好")
-- 明确回复某条消息时使用 reply_to 参数，不要回复自己的话
-- at群友时用 mentions 参数（可以同时at多个人），不要在内容里写"@"符号`,
+- 错误示例：speak("你好。今天天气真好")或speak("你好\n今天天气真好")
+- 回复某条消息时使用reply_to参数，不要回复自己的话
+- at群友时用mentions参数（可同时at多个人），不要在content里直接写"@"符号`,
 		speakFunc,
 	)
 }
@@ -216,7 +216,7 @@ type RecallMessageInput struct {
 	// MessageID 要撤回的消息ID
 	MessageID int64 `json:"message_id" jsonschema:"description=要撤回的消息ID"`
 	// Reason 撤回原因
-	Reason string `json:"reason,omitempty" jsonschema:"description=撤回原因（给自己看的笔记）"`
+	Reason string `json:"reason,omitempty" jsonschema:"description=撤回原因"`
 }
 
 // RecallMessageOutput 撤回消息的输出
@@ -253,7 +253,7 @@ func recallMessageFunc(ctx context.Context, input *RecallMessageInput) (*RecallM
 func NewRecallMessageTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"recallMessage",
-		"撤回你自己发的消息。当你发错消息、说错话、或者想收回刚才的发言时使用。只能撤回自己两分钟内发的消息。",
+		"撤回你自己发的消息。当你发错消息、说错话、或者想收回刚才的发言时使用。",
 		recallMessageFunc,
 	)
 }
