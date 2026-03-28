@@ -107,14 +107,10 @@ func updateMemberProfileFunc(ctx context.Context, input *UpdateMemberProfileInpu
 	profile.Intimacy = mutils.ClampFloat64(profile.Intimacy+delta, 0, 1)
 
 	if err := tc.MemoryMgr.UpdateMemberProfile(profile); err != nil {
-		output := &UpdateMemberProfileOutput{Success: false, Message: err.Error()}
-		LogToolCall("updateMemberProfile", input, output, err)
-		return output, nil
+		return &UpdateMemberProfileOutput{Success: false, Message: err.Error()}, nil
 	}
 
-	output := &UpdateMemberProfileOutput{Success: true, Message: "已更新对该群友的了解"}
-	LogToolCall("updateMemberProfile", input, output, nil)
-	return output, nil
+	return &UpdateMemberProfileOutput{Success: true, Message: "已更新对该群友的了解"}, nil
 }
 
 // NewUpdateMemberProfileTool 创建更新成员画像工具
@@ -160,12 +156,10 @@ func getMemberInfoFunc(ctx context.Context, input *GetMemberInfoInput) (*GetMemb
 
 	profile, err := tc.MemoryMgr.GetMemberProfile(input.UserID)
 	if err != nil {
-		output := &GetMemberInfoOutput{
+		return &GetMemberInfoOutput{
 			Success: false,
 			Message: "不太了解这个人",
-		}
-		LogToolCall("getMemberInfo", input, output, err)
-		return output, nil
+		}, nil
 	}
 
 	var interests, commonWords []string
@@ -180,7 +174,7 @@ func getMemberInfoFunc(ctx context.Context, input *GetMemberInfoInput) (*GetMemb
 		}
 	}
 
-	output := &GetMemberInfoOutput{
+	return &GetMemberInfoOutput{
 		Success:     true,
 		Nickname:    profile.Nickname,
 		SpeakStyle:  profile.SpeakStyle,
@@ -189,9 +183,7 @@ func getMemberInfoFunc(ctx context.Context, input *GetMemberInfoInput) (*GetMemb
 		Activity:    profile.Activity,
 		Intimacy:    profile.Intimacy,
 		MsgCount:    profile.MsgCount,
-	}
-	LogToolCall("getMemberInfo", input, output, nil)
-	return output, nil
+	}, nil
 }
 
 // NewGetMemberInfoTool 创建获取成员信息工具

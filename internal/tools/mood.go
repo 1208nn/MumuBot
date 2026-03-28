@@ -49,20 +49,16 @@ func updateMoodFunc(ctx context.Context, input *UpdateMoodInput) (*UpdateMoodOut
 
 	mood, err := tc.MemoryMgr.UpdateMoodState(valenceDelta, energyDelta, sociabilityDelta, input.Reason)
 	if err != nil {
-		output := &UpdateMoodOutput{Success: false, Message: "更新情绪失败: " + err.Error()}
-		LogToolCall("updateMood", input, output, err)
-		return output, nil
+		return &UpdateMoodOutput{Success: false, Message: "更新情绪失败: " + err.Error()}, nil
 	}
 
-	output := &UpdateMoodOutput{
+	return &UpdateMoodOutput{
 		Success:     true,
 		Message:     "情绪已更新",
 		Valence:     mood.Valence,
 		Energy:      mood.Energy,
 		Sociability: mood.Sociability,
-	}
-	LogToolCall("updateMood", input, output, nil)
-	return output, nil
+	}, nil
 }
 
 // NewUpdateMoodTool 创建更新情绪工具

@@ -7,8 +7,6 @@ import (
 	"mumu-bot/internal/llm"
 	"mumu-bot/internal/logger"
 	"mumu-bot/internal/memory"
-	"mumu-bot/internal/onebot"
-	"mumu-bot/internal/persona"
 	"mumu-bot/internal/server"
 	"os"
 	"os/signal"
@@ -18,12 +16,6 @@ import (
 )
 
 func main() {
-	fmt.Println("=================================")
-	fmt.Println("    沐沐 - 赛博QQ群友 v2.0")
-	fmt.Println("      (powered by Eino)")
-	fmt.Println("=================================")
-
-	// 加载配置
 	configPath := "config/config.yaml"
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -51,41 +43,8 @@ func main() {
 	defer memoryMgr.Close()
 	zap.L().Info("记忆系统已初始化")
 
-	// 创建 LLM 客户端
-	llmClient, err := llm.NewClient()
-	if err != nil {
-		zap.L().Fatal("LLM 客户端创建失败", zap.Error(err))
-	}
-	zap.L().Info("LLM 已连接", zap.String("model", cfg.LLM.Model), zap.String("base_url", cfg.LLM.BaseURL))
-
-	// 创建 Vision 客户端（多模态视觉理解）
-	var visionClient *llm.VisionClient
-	if cfg.VisionLLM.Enabled {
-		var err error
-		visionClient, err = llm.NewVisionClient()
-		if err != nil {
-			zap.L().Error("Vision 客户端创建失败，视觉理解不可用", zap.Error(err))
-		} else {
-			zap.L().Info("Vision 已启用", zap.String("model", cfg.VisionLLM.Model))
-		}
-	}
-
-	// 创建 OneBot 客户端
-	botClient := onebot.NewClient()
-	if err := botClient.Connect(); err != nil {
-		zap.L().Fatal("OneBot 连接失败", zap.Error(err))
-	}
-	defer botClient.Close()
-
-	// 创建人格
-	mumuPersona := persona.NewPersona(&cfg.Persona)
-	zap.L().Info("人格已加载", zap.String("name", mumuPersona.GetName()))
-
-	// 获取底层 ChatModel 作为 ToolCallingChatModel
-	chatModel := llmClient.GetModel()
-
 	// 创建 Agent
-	mumuAgent, err := agent.New(mumuPersona, memoryMgr, chatModel, visionClient, botClient)
+	mumuAgent, err := agent.New(memoryMgr)
 	if err != nil {
 		zap.L().Fatal("Agent 创建失败", zap.Error(err))
 	}

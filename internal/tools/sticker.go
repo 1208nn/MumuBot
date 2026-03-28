@@ -42,15 +42,11 @@ func searchStickersFunc(ctx context.Context, input *SearchStickersInput) (*Searc
 
 	stickers, err := tc.MemoryMgr.SearchStickers(input.Keyword, limit)
 	if err != nil {
-		output := &SearchStickersOutput{Success: false, Message: "搜索失败: " + err.Error()}
-		LogToolCall("searchStickers", input, output, err)
-		return output, nil
+		return &SearchStickersOutput{Success: false, Message: "搜索失败: " + err.Error()}, nil
 	}
 
 	if len(stickers) == 0 {
-		output := &SearchStickersOutput{Success: true, Message: "没有找到相关表情包"}
-		LogToolCall("searchStickers", input, output, nil)
-		return output, nil
+		return &SearchStickersOutput{Success: true, Message: "没有找到相关表情包"}, nil
 	}
 
 	results := make([]StickerSummary, 0, len(stickers))
@@ -62,9 +58,7 @@ func searchStickersFunc(ctx context.Context, input *SearchStickersInput) (*Searc
 		})
 	}
 
-	output := &SearchStickersOutput{Success: true, Stickers: results}
-	LogToolCall("searchStickers", input, output, nil)
-	return output, nil
+	return &SearchStickersOutput{Success: true, Stickers: results}, nil
 }
 
 func NewSearchStickersTool() (tool.InvokableTool, error) {
@@ -102,9 +96,7 @@ func sendStickerFunc(ctx context.Context, input *SendStickerInput) (*SendSticker
 	// 获取表情包信息
 	sticker, err := tc.MemoryMgr.GetStickerByID(input.StickerID)
 	if err != nil {
-		output := &SendStickerOutput{Success: false, Message: "表情包不存在"}
-		LogToolCall("sendSticker", input, output, err)
-		return output, nil
+		return &SendStickerOutput{Success: false, Message: "表情包不存在"}, nil
 	}
 
 	// 构建文件路径
@@ -115,36 +107,28 @@ func sendStickerFunc(ctx context.Context, input *SendStickerInput) (*SendSticker
 	}
 	filePath, err := filepath.Abs(filepath.Join(storagePath, sticker.FileName))
 	if err != nil {
-		output := &SendStickerOutput{Success: false, Message: "获取文件路径失败"}
-		LogToolCall("sendSticker", input, output, err)
-		return output, nil
+		return &SendStickerOutput{Success: false, Message: "获取文件路径失败"}, nil
 	}
 
 	// 检查文件是否存在
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		output := &SendStickerOutput{Success: false, Message: "表情包文件不存在"}
-		LogToolCall("sendSticker", input, output, err)
-		return output, nil
+		return &SendStickerOutput{Success: false, Message: "表情包文件不存在"}, nil
 	}
 
 	// 发送表情包（使用回调以记录消息）
-	msgID, err := tc.SendStickerCallback(tc.GroupID, filePath, sticker.Description)
+	msgID, err := tc.SendStickerCallback(ctx, tc.GroupID, filePath, sticker.Description)
 	if err != nil {
-		output := &SendStickerOutput{Success: false, Message: err.Error()}
-		LogToolCall("sendSticker", input, output, err)
-		return output, nil
+		return &SendStickerOutput{Success: false, Message: err.Error()}, nil
 	}
 
 	// 更新使用记录
 	_ = tc.MemoryMgr.UpdateStickerUsage(input.StickerID)
 
-	output := &SendStickerOutput{
+	return &SendStickerOutput{
 		Success:   true,
 		Message:   "表情包已发送",
 		MessageID: msgID,
-	}
-	LogToolCall("sendSticker", input, output, nil)
-	return output, nil
+	}, nil
 }
 
 func NewSendStickerTool() (tool.InvokableTool, error) {

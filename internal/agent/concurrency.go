@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"sync"
 
 	"go.uber.org/zap"
@@ -8,11 +9,14 @@ import (
 
 // ConcurrencyManager 并发管理器
 type ConcurrencyManager struct {
+	ctx            context.Context
+	cancel         context.CancelFunc
 	maxConcurrency int
 	currentRunning int
 	queue          []*ThinkTask
 	inQueue        map[int64]bool // 快速去重（群组ID -> 是否在队列中）
 	mu             sync.Mutex
+	wg             sync.WaitGroup
 
 	handler func(groupID int64, isMention bool) // 执行函数
 }
@@ -24,8 +28,11 @@ type ThinkTask struct {
 }
 
 // NewConcurrencyManager 创建并发管理器
-func NewConcurrencyManager(max int, h func(groupID int64, isMention bool)) *ConcurrencyManager {
+func NewConcurrencyManager(parent context.Context, max int, h func(groupID int64, isMention bool)) *ConcurrencyManager {
+	ctx, cancel := context.WithCancel(parent)
 	return &ConcurrencyManager{
+		ctx:            ctx,
+		cancel:         cancel,
 		maxConcurrency: max,
 		currentRunning: 0,
 		inQueue:        make(map[int64]bool),
@@ -35,6 +42,10 @@ func NewConcurrencyManager(max int, h func(groupID int64, isMention bool)) *Conc
 
 // Submit 提交任务
 func (m *ConcurrencyManager) Submit(groupID int64, isMention bool) {
+	if err := m.ctx.Err(); err != nil {
+		return
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -58,12 +69,17 @@ func (m *ConcurrencyManager) Submit(groupID int64, isMention bool) {
 	}
 
 	m.currentRunning++
+	m.wg.Add(1)
 	go m.execute(groupID, isMention)
 }
 
 // execute 执行任务
 func (m *ConcurrencyManager) execute(groupID int64, isMention bool) {
+	defer m.wg.Done()
 	defer m.Finish()
+	if err := m.ctx.Err(); err != nil {
+		return
+	}
 	m.handler(groupID, isMention)
 }
 
@@ -78,7 +94,7 @@ func (m *ConcurrencyManager) Finish() {
 	}
 
 	// 调度下一个任务
-	if len(m.queue) > 0 {
+	if len(m.queue) > 0 && m.ctx.Err() == nil {
 		// 取出队首任务
 		task := m.queue[0]
 		m.queue = m.queue[1:]
@@ -86,7 +102,22 @@ func (m *ConcurrencyManager) Finish() {
 
 		// 立即启动
 		m.currentRunning++
+		m.wg.Add(1)
 		go m.execute(task.GroupID, task.IsMention)
 		zap.L().Debug("从队列调度任务执行", zap.Int64("group_id", task.GroupID))
 	}
+}
+
+// Close 停止调度并等待已启动任务退出。
+func (m *ConcurrencyManager) Close() {
+	if m.cancel != nil {
+		m.cancel()
+	}
+
+	m.mu.Lock()
+	m.queue = nil
+	m.inQueue = make(map[int64]bool)
+	m.mu.Unlock()
+
+	m.wg.Wait()
 }

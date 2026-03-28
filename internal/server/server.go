@@ -148,7 +148,7 @@ func (s *Server) deleteMemory(c *gin.Context) {
 		return
 	}
 
-	if err := s.memoryMgr.GetDB().Delete(&memory.Memory{}, id).Error; err != nil {
+	if err := s.memoryMgr.DeleteMemory(c.Request.Context(), uint(id)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

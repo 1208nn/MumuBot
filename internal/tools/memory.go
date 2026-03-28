@@ -55,7 +55,7 @@ func saveMemoryFunc(ctx context.Context, input *SaveMemoryInput) (*SaveMemoryOut
 	}
 
 	// 向量相似度搜索
-	similarMems, err := tc.MemoryMgr.SearchSimilarMemories(ctx, input.Content, tc.GroupID, 0.85)
+	similarMems, err := tc.MemoryMgr.SearchSimilarMemories(ctx, input.Content, tc.GroupID, "", 30, 0.85)
 	if err == nil && len(similarMems) > 0 {
 		// 调用辅助模型进行合并
 		auxModel, err := llm.NewAuxClient()
@@ -115,14 +115,10 @@ func saveMemoryFunc(ctx context.Context, input *SaveMemoryInput) (*SaveMemoryOut
 	}
 
 	if err := tc.MemoryMgr.SaveMemory(ctx, mem); err != nil {
-		output := &SaveMemoryOutput{Success: false, Message: err.Error()}
-		LogToolCall("saveMemory", input, output, err)
-		return output, nil
+		return &SaveMemoryOutput{Success: false, Message: err.Error()}, nil
 	}
 
-	output := &SaveMemoryOutput{Success: true, Message: "已记住"}
-	LogToolCall("saveMemory", input, output, nil)
-	return output, nil
+	return &SaveMemoryOutput{Success: true, Message: "已记住"}, nil
 }
 
 // NewSaveMemoryTool 创建保存记忆工具
@@ -187,9 +183,7 @@ func queryMemoryFunc(ctx context.Context, input *QueryMemoryInput) (*QueryMemory
 
 	memories, err := tc.MemoryMgr.QueryMemory(ctx, input.Query, groupID, memory.MemoryType(input.Type), limit)
 	if err != nil {
-		output := &QueryMemoryOutput{Success: false, Message: err.Error()}
-		LogToolCall("queryMemory", input, output, err)
-		return output, nil
+		return &QueryMemoryOutput{Success: false, Message: err.Error()}, nil
 	}
 
 	results := make([]map[string]interface{}, 0, len(memories))
@@ -202,13 +196,11 @@ func queryMemoryFunc(ctx context.Context, input *QueryMemoryInput) (*QueryMemory
 		})
 	}
 
-	output := &QueryMemoryOutput{
+	return &QueryMemoryOutput{
 		Success:  true,
 		Count:    len(results),
 		Memories: results,
-	}
-	LogToolCall("queryMemory", input, output, nil)
-	return output, nil
+	}, nil
 }
 
 // NewQueryMemoryTool 创建查询记忆工具

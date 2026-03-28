@@ -59,15 +59,11 @@ func saveJargonFunc(ctx context.Context, input *SaveJargonInput) (*SaveJargonOut
 		existing.Rejected = false
 
 		if err := lc.MemMgr.SaveJargon(existing); err != nil {
-			output := &SaveJargonOutput{Success: false, Message: err.Error()}
-			LogToolCall("saveJargon", input, output, err)
-			return output, nil
+			return &SaveJargonOutput{Success: false, Message: err.Error()}, nil
 		}
 
 		msg := fmt.Sprintf("已更新黑话 '%s' 的含义", input.Content)
-		output := &SaveJargonOutput{Success: true, Message: msg}
-		LogToolCall("saveJargon", input, output, nil)
-		return output, nil
+		return &SaveJargonOutput{Success: true, Message: msg}, nil
 	}
 
 	// 新建黑话
@@ -81,9 +77,7 @@ func saveJargonFunc(ctx context.Context, input *SaveJargonInput) (*SaveJargonOut
 	}
 
 	if err := lc.MemMgr.SaveJargon(jargon); err != nil {
-		output := &SaveJargonOutput{Success: false, Message: err.Error()}
-		LogToolCall("saveJargon", input, output, err)
-		return output, nil
+		return &SaveJargonOutput{Success: false, Message: err.Error()}, nil
 	}
 
 	// 实时更新 AC 自动机
@@ -91,9 +85,7 @@ func saveJargonFunc(ctx context.Context, input *SaveJargonInput) (*SaveJargonOut
 		lc.JargonMgr.AddJargon(input.Content, input.Meaning)
 	}
 
-	output := &SaveJargonOutput{Success: true, Message: "已记住这个黑话"}
-	LogToolCall("saveJargon", input, output, nil)
-	return output, nil
+	return &SaveJargonOutput{Success: true, Message: "已记住这个黑话"}, nil
 }
 
 // NewSaveJargonTool 创建保存黑话工具
@@ -141,9 +133,7 @@ func searchJargonFunc(ctx context.Context, input *SearchJargonInput) (*SearchJar
 
 	jargons, err := tc.MemoryMgr.SearchJargons(tc.GroupID, input.Keyword, limit)
 	if err != nil {
-		output := &SearchJargonOutput{Success: false, Message: err.Error()}
-		LogToolCall("searchJargon", input, output, err)
-		return output, nil
+		return &SearchJargonOutput{Success: false, Message: err.Error()}, nil
 	}
 
 	results := make([]map[string]any, 0, len(jargons))
@@ -158,13 +148,11 @@ func searchJargonFunc(ctx context.Context, input *SearchJargonInput) (*SearchJar
 		})
 	}
 
-	output := &SearchJargonOutput{
+	return &SearchJargonOutput{
 		Success: true,
 		Count:   len(results),
 		Jargons: results,
-	}
-	LogToolCall("searchJargon", input, output, nil)
-	return output, nil
+	}, nil
 }
 
 // NewSearchJargonTool 创建搜索黑话工具
@@ -208,9 +196,7 @@ func getUncheckedJargonsFunc(ctx context.Context, input *GetUncheckedJargonsInpu
 
 	jargons, err := lc.MemMgr.GetUncheckedJargons(lc.GroupID, limit)
 	if err != nil {
-		output := &GetUncheckedJargonsOutput{Success: false, Message: err.Error()}
-		LogToolCall("getUncheckedJargons", input, output, err)
-		return output, nil
+		return &GetUncheckedJargonsOutput{Success: false, Message: err.Error()}, nil
 	}
 
 	results := make([]UncheckedJargonItem, 0, len(jargons))
@@ -223,9 +209,7 @@ func getUncheckedJargonsFunc(ctx context.Context, input *GetUncheckedJargonsInpu
 		})
 	}
 
-	output := &GetUncheckedJargonsOutput{Success: true, Jargons: results}
-	LogToolCall("getUncheckedJargons", input, output, nil)
-	return output, nil
+	return &GetUncheckedJargonsOutput{Success: true, Jargons: results}, nil
 }
 
 func NewGetUncheckedJargonsTool() (tool.InvokableTool, error) {
@@ -260,18 +244,14 @@ func reviewJargonFunc(ctx context.Context, input *ReviewJargonInput) (*ReviewJar
 
 	err := lc.MemMgr.BatchReviewJargon(input.IDs, input.Approve)
 	if err != nil {
-		output := &ReviewJargonOutput{Success: false, Message: err.Error()}
-		LogToolCall("reviewJargon", input, output, err)
-		return output, nil
+		return &ReviewJargonOutput{Success: false, Message: err.Error()}, nil
 	}
 
 	msg := "已拒绝这些黑话"
 	if input.Approve {
 		msg = "已验证这些黑话"
 	}
-	output := &ReviewJargonOutput{Success: true, Message: msg}
-	LogToolCall("reviewJargon", input, output, nil)
-	return output, nil
+	return &ReviewJargonOutput{Success: true, Message: msg}, nil
 }
 
 func NewReviewJargonTool() (tool.InvokableTool, error) {

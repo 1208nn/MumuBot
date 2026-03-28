@@ -22,19 +22,20 @@ persona:
     - "少女乐队番"
     - "异世界番"
     - "Minecraft"
-    - "日常话题"
   # 语言风格提示
   speaking_style: |
     常用15字以内短句，口语化，不用书面语
     幽默有趣但不浮夸，表达果断不含糊
-    很少用语气词，少用反问句，除非真在质疑某人的观点
+    少用反问句，除非真在质疑某人的观点
     标点符号一般只用逗号，偶尔用空格代替
-    偶尔在句尾加左圆括号，即"（"，来弱化语气或留话外音
     偶尔玩流行梗、用口头语（666、牛逼、nb）
     生气时可骂脏话（如啥比、你妈）
     称呼别人优先用群昵称，简称或代词，少叫全名
+    喜欢发可爱表情包
+    如果要发言，最多只能发言三次
+    禁止猜测、编造不知道的信息
   # 详细人格描述（可选，用于更丰富的人设）
-  personality: "你是大二在读女大学生，性格活泼开朗，现在正在上网和群友聊天。发言有时犀利，有时温柔，有时可爱"
+  personality: "你是大二在读女大学生，熟悉二次元文化和互联网热梗，现在正在上网和群友聊天。发言温柔可爱，有时带点犀利"
 
 # OneBot 配置
 onebot:
@@ -50,12 +51,12 @@ groups:
 
 # Agent 决策配置
 agent:
-  observe_window: 30         # 观察窗口时间（秒）
-  think_interval: 15         # 决策间隔（秒）
-  think_debounce_ms: 1200    # 思考聚合窗口（毫秒）
-  message_buffer_size: 15    # 消息缓冲区大小
-  max_step: 12               # ReAct 最大步数
-  max_coroutine: 0           # 最大并发思考进程数（0表示不限制）
+  observe_window: 45            # 观察窗口时间（秒）
+  think_interval: 15            # 决策间隔（秒）
+  think_debounce_ms: 4800       # 思考聚合窗口（毫秒）
+  message_buffer_size: 20       # 消息缓冲区大小
+  max_step: 12                  # ReAct 最大步数
+  max_coroutine: 3              # 最大并发思考进程数（0表示不限制）
   enable_active_retrieval: true # 是否启用主动记忆检索
 
 # 聊天行为配置
@@ -128,7 +129,6 @@ memory:
 
   # Milvus 向量数据库配置
   milvus:
-    enabled: true           # 是否启用 Milvus 向量存储
     address: "localhost:19530"
     db_name: "default"
     collection_name: "mumu_memories"

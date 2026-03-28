@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"fmt"
-	"mumu-bot/internal/tools"
 	"os"
 	"sync"
 
@@ -50,7 +49,7 @@ func NewMCPManager() *Manager {
 }
 
 // LoadFromConfig 从配置文件加载 MCP 服务器
-func (m *Manager) LoadFromConfig(configPath string) error {
+func (m *Manager) LoadFromConfig(ctx context.Context, configPath string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -68,7 +67,9 @@ func (m *Manager) LoadFromConfig(configPath string) error {
 		return fmt.Errorf("解析 MCP 配置文件失败: %w", err)
 	}
 
-	ctx := context.Background()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	for _, serverCfg := range cfg.Servers {
 		if !serverCfg.Enabled {
@@ -140,17 +141,8 @@ func (m *Manager) connectServer(ctx context.Context, cfg *ServerConfig) error {
 		return fmt.Errorf("获取 MCP 工具失败: %w", err)
 	}
 
-	// 包装工具以添加调用日志
-	wrappedTools := make([]tool.BaseTool, 0, len(baseTools))
-	for _, t := range baseTools {
-		wrappedTools = append(wrappedTools, &loggingToolWrapper{
-			BaseTool:   t,
-			serverName: cfg.Name,
-		})
-	}
-
 	m.clients = append(m.clients, cli)
-	m.tools = append(m.tools, wrappedTools...)
+	m.tools = append(m.tools, baseTools...)
 
 	zap.L().Info("已加载 MCP 工具",
 		zap.String("server", cfg.Name),
@@ -179,25 +171,4 @@ func (m *Manager) Close() {
 
 	m.clients = nil
 	m.tools = nil
-}
-
-// loggingToolWrapper 带日志的工具包装器
-type loggingToolWrapper struct {
-	tool.BaseTool
-	serverName string
-}
-
-// InvokableRun 包装 InvokableRun 方法以添加调用日志
-func (w *loggingToolWrapper) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	if invokable, ok := w.BaseTool.(tool.InvokableTool); ok {
-		result, err := invokable.InvokableRun(ctx, argumentsInJSON, opts...)
-		// 截断返回结果到100字
-		truncatedResult := result
-		if len(truncatedResult) > 100 {
-			truncatedResult = truncatedResult[:100] + "..."
-		}
-		tools.LogToolCall(w.serverName, argumentsInJSON, truncatedResult, err)
-		return result, err
-	}
-	return "", fmt.Errorf("工具不支持 InvokableRun")
 }

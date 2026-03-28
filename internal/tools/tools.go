@@ -7,6 +7,8 @@ import (
 	"mumu-bot/internal/jargon"
 	"mumu-bot/internal/memory"
 	"mumu-bot/internal/onebot"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -18,10 +20,10 @@ import (
 )
 
 // SpeakCallback 发言回调函数类型，返回消息ID
-type SpeakCallback func(groupID int64, content string, replyTo int64, mentions []int64) (int64, error)
+type SpeakCallback func(ctx context.Context, groupID int64, content string, replyTo int64, mentions []int64) (int64, error)
 
 // SendStickerCallback 发送表情包回调函数类型
-type SendStickerCallback func(groupID int64, filePath string, description string) (int64, error)
+type SendStickerCallback func(ctx context.Context, groupID int64, filePath string, description string) (int64, error)
 
 // ToolContext 工具执行上下文
 type ToolContext struct {
@@ -30,12 +32,16 @@ type ToolContext struct {
 	Bot                 *onebot.Client
 	SpeakCallback       SpeakCallback       // 发言回调
 	SendStickerCallback SendStickerCallback // 发送表情包回调
+
+	seenMu        sync.Mutex
+	seenToolCalls map[string]struct{}
 }
 
 // ctxKey 上下文键类型
 type ctxKey string
 
 const toolContextKey ctxKey = "tool_context"
+const toolLogMaxLen = 1000
 
 // WithToolContext 将工具上下文放入 context
 func WithToolContext(ctx context.Context, tc *ToolContext) context.Context {
@@ -48,6 +54,24 @@ func GetToolContext(ctx context.Context) *ToolContext {
 		return tc
 	}
 	return nil
+}
+
+// MarkToolCallSeen 记录本轮 think 中已执行过的工具调用。
+// 同一个 ToolContext 只在单个群、单轮思考内使用，因此这里的缓存天然是按群按轮隔离的。
+func (tc *ToolContext) MarkToolCallSeen(toolName string, arguments string) bool {
+	key := toolName + "-" + arguments
+
+	tc.seenMu.Lock()
+	defer tc.seenMu.Unlock()
+
+	if tc.seenToolCalls == nil {
+		tc.seenToolCalls = make(map[string]struct{}, 8)
+	}
+	if _, ok := tc.seenToolCalls[key]; ok {
+		return true
+	}
+	tc.seenToolCalls[key] = struct{}{}
+	return false
 }
 
 // LearningContext 学习任务上下文
@@ -72,74 +96,35 @@ func GetLearningContext(ctx context.Context) *LearningContext {
 	return nil
 }
 
+func truncateToolLogString(raw string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+
+	runes := []rune(trimmed)
+	if len(runes) <= max {
+		return trimmed
+	}
+	return string(runes[:max]) + "...(truncated)"
+}
+
 // LogToolCall 记录工具调用
-func LogToolCall(toolName string, input interface{}, output interface{}, err error) {
+func LogToolCall(toolName string, inputJSON string, outputJSON string, err error) {
 	cfg := config.Get()
 	if cfg != nil && cfg.Debug.ShowToolCalls {
-		inputJSON, _ := sonic.MarshalString(input)
-		outputJSON, _ := sonic.MarshalString(output)
+		inputJSON = truncateToolLogString(inputJSON, toolLogMaxLen)
+		outputJSON = truncateToolLogString(outputJSON, toolLogMaxLen)
 		if err != nil {
 			zap.L().Debug("工具调用", zap.String("tool", toolName), zap.String("input", inputJSON), zap.String("output", outputJSON), zap.Error(err))
 		} else {
 			zap.L().Debug("工具调用", zap.String("tool", toolName), zap.String("input", inputJSON), zap.String("output", outputJSON))
 		}
 	}
-}
-
-// ==================== 获取群信息工具 ====================
-
-// GetGroupInfoInput 获取群信息的输入参数
-type GetGroupInfoInput struct{}
-
-// GetGroupInfoOutput 获取群信息的输出
-type GetGroupInfoOutput struct {
-	Success        bool   `json:"success"`
-	Message        string `json:"message,omitempty"`
-	GroupID        int64  `json:"group_id,omitempty"`
-	GroupName      string `json:"group_name,omitempty"`
-	MemberCount    int    `json:"member_count,omitempty"`
-	MaxMemberCount int    `json:"max_member_count,omitempty"`
-}
-
-// getGroupInfoFunc 获取群信息的实际实现
-func getGroupInfoFunc(ctx context.Context, input *GetGroupInfoInput) (*GetGroupInfoOutput, error) {
-	tc := GetToolContext(ctx)
-	if tc == nil {
-		output := &GetGroupInfoOutput{Success: false, Message: "工具上下文未初始化"}
-		LogToolCall("getGroupInfo", input, output, nil)
-		return output, nil
-	}
-	if tc.Bot == nil {
-		output := &GetGroupInfoOutput{Success: false, Message: "Bot 未连接"}
-		LogToolCall("getGroupInfo", input, output, nil)
-		return output, nil
-	}
-
-	info, err := tc.Bot.GetGroupInfo(tc.GroupID, false)
-	if err != nil {
-		output := &GetGroupInfoOutput{Success: false, Message: err.Error()}
-		LogToolCall("getGroupInfo", input, output, err)
-		return output, nil
-	}
-
-	output := &GetGroupInfoOutput{
-		Success:        true,
-		GroupID:        info.GroupID,
-		GroupName:      info.GroupName,
-		MemberCount:    info.MemberCount,
-		MaxMemberCount: info.MaxMemberCount,
-	}
-	LogToolCall("getGroupInfo", input, output, nil)
-	return output, nil
-}
-
-// NewGetGroupInfoTool 创建获取群信息工具
-func NewGetGroupInfoTool() (tool.InvokableTool, error) {
-	return utils.InferTool(
-		"getGroupInfo",
-		"获取当前群的基本信息，包括群名称、成员数量等。",
-		getGroupInfoFunc,
-	)
 }
 
 // ==================== 获取群成员详情工具 ====================
@@ -177,11 +162,9 @@ func getGroupMemberDetailFunc(ctx context.Context, input *GetGroupMemberDetailIn
 		return &GetGroupMemberDetailOutput{Success: false, Message: "用户 ID 不能为空"}, nil
 	}
 
-	info, err := tc.Bot.GetGroupMemberInfo(tc.GroupID, input.UserID, false)
+	info, err := tc.Bot.GetGroupMemberInfo(ctx, tc.GroupID, input.UserID, false)
 	if err != nil {
-		output := &GetGroupMemberDetailOutput{Success: false, Message: err.Error()}
-		LogToolCall("getGroupMemberDetail", input, output, err)
-		return output, nil
+		return &GetGroupMemberDetailOutput{Success: false, Message: err.Error()}, nil
 	}
 
 	output := &GetGroupMemberDetailOutput{
@@ -201,7 +184,6 @@ func getGroupMemberDetailFunc(ctx context.Context, input *GetGroupMemberDetailIn
 		output.LastSentTime = time.Unix(info.LastSentTime, 0).Format("2006-01-02 15:04:05")
 	}
 
-	LogToolCall("getGroupMemberDetail", input, output, nil)
 	return output, nil
 }
 
@@ -250,12 +232,10 @@ func getRecentMessagesFunc(ctx context.Context, input *GetRecentMessagesInput) (
 		})
 	}
 
-	output := &GetRecentMessagesOutput{
+	return &GetRecentMessagesOutput{
 		Success:  true,
 		Messages: results,
-	}
-	LogToolCall("getRecentMessages", input, output, nil)
-	return output, nil
+	}, nil
 }
 
 func NewGetRecentMessagesTool() (tool.InvokableTool, error) {
@@ -294,11 +274,9 @@ func getGroupNoticesFunc(ctx context.Context, input *GetGroupNoticesInput) (*Get
 		return &GetGroupNoticesOutput{Success: false, Message: "Bot 未连接"}, nil
 	}
 
-	notices, err := tc.Bot.GetGroupNotice(tc.GroupID)
+	notices, err := tc.Bot.GetGroupNotice(ctx, tc.GroupID)
 	if err != nil {
-		output := &GetGroupNoticesOutput{Success: false, Message: "获取群公告失败: " + err.Error()}
-		LogToolCall("getGroupNotices", input, output, err)
-		return output, nil
+		return &GetGroupNoticesOutput{Success: false, Message: "获取群公告失败: " + err.Error()}, nil
 	}
 
 	limit := input.Limit
@@ -319,9 +297,7 @@ func getGroupNoticesFunc(ctx context.Context, input *GetGroupNoticesInput) (*Get
 		})
 	}
 
-	output := &GetGroupNoticesOutput{Success: true, Notices: results}
-	LogToolCall("getGroupNotices", input, output, nil)
-	return output, nil
+	return &GetGroupNoticesOutput{Success: true, Notices: results}, nil
 }
 
 func NewGetGroupNoticesTool() (tool.InvokableTool, error) {
@@ -361,11 +337,9 @@ func getEssenceMessagesFunc(ctx context.Context, input *GetEssenceMessagesInput)
 		return &GetEssenceMessagesOutput{Success: false, Message: "Bot 未连接"}, nil
 	}
 
-	messages, err := tc.Bot.GetEssenceMessages(tc.GroupID)
+	messages, err := tc.Bot.GetEssenceMessages(ctx, tc.GroupID)
 	if err != nil {
-		output := &GetEssenceMessagesOutput{Success: false, Message: "获取群精华消息失败: " + err.Error()}
-		LogToolCall("getEssenceMessages", input, output, err)
-		return output, nil
+		return &GetEssenceMessagesOutput{Success: false, Message: "获取群精华消息失败: " + err.Error()}, nil
 	}
 
 	limit := input.Limit
@@ -387,9 +361,7 @@ func getEssenceMessagesFunc(ctx context.Context, input *GetEssenceMessagesInput)
 		})
 	}
 
-	output := &GetEssenceMessagesOutput{Success: true, Messages: results}
-	LogToolCall("getEssenceMessages", input, output, nil)
-	return output, nil
+	return &GetEssenceMessagesOutput{Success: true, Messages: results}, nil
 }
 
 func NewGetEssenceMessagesTool() (tool.InvokableTool, error) {
@@ -429,17 +401,13 @@ func getMessageReactionsFunc(ctx context.Context, input *GetMessageReactionsInpu
 		return &GetMessageReactionsOutput{Success: false, Message: "消息 ID 不能为空"}, nil
 	}
 
-	reactions, err := tc.Bot.GetMessageReactions(input.MessageID)
+	reactions, err := tc.Bot.GetMessageReactions(ctx, input.MessageID)
 	if err != nil {
-		output := &GetMessageReactionsOutput{Success: false, Message: "获取表情回应失败: " + err.Error()}
-		LogToolCall("getMessageReactions", input, output, err)
-		return output, nil
+		return &GetMessageReactionsOutput{Success: false, Message: "获取表情回应失败: " + err.Error()}, nil
 	}
 
 	if len(reactions) == 0 {
-		output := &GetMessageReactionsOutput{Success: true, Message: "该消息暂无表情回应"}
-		LogToolCall("getMessageReactions", input, output, nil)
-		return output, nil
+		return &GetMessageReactionsOutput{Success: true, Message: "该消息暂无表情回应"}, nil
 	}
 
 	results := make([]ReactionSummary, 0, len(reactions))
@@ -450,9 +418,7 @@ func getMessageReactionsFunc(ctx context.Context, input *GetMessageReactionsInpu
 		})
 	}
 
-	output := &GetMessageReactionsOutput{Success: true, Reactions: results}
-	LogToolCall("getMessageReactions", input, output, nil)
-	return output, nil
+	return &GetMessageReactionsOutput{Success: true, Reactions: results}, nil
 }
 
 func NewGetMessageReactionsTool() (tool.InvokableTool, error) {
@@ -503,12 +469,10 @@ func getForwardMessageDetailFunc(ctx context.Context, input *GetForwardMessageDe
 		return &GetForwardMessageDetailOutput{Success: false, Message: "解析合并转发内容失败"}, nil
 	}
 
-	output := &GetForwardMessageDetailOutput{
+	return &GetForwardMessageDetailOutput{
 		Success:  true,
 		Forwards: forwards,
-	}
-	LogToolCall("getForwardMessageDetail", input, output, nil)
-	return output, nil
+	}, nil
 }
 
 // NewGetForwardMessageDetailTool 创建查看合并转发工具
@@ -520,34 +484,12 @@ func NewGetForwardMessageDetailTool() (tool.InvokableTool, error) {
 	)
 }
 
-// ==================== 网页浏览工具 ====================
-
-// httpRequestToolWrapper 包装 HTTP 请求工具以添加日志记录
-type httpRequestToolWrapper struct {
-	tool.InvokableTool
-}
-
-func (w *httpRequestToolWrapper) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
-	output, err := w.InvokableTool.InvokableRun(ctx, argumentsInJSON, opts...)
-	// 截断输出以避免日志过长
-	logOutput := output
-	if len(logOutput) > 300 {
-		logOutput = logOutput[:300] + "...(truncated)"
-	}
-	LogToolCall("request_get", argumentsInJSON, logOutput, err)
-	return output, err
-}
-
 func NewHttpRequestTool() (tool.BaseTool, error) {
-	baseTool, err := getreq.NewTool(context.Background(), &getreq.Config{
+	return getreq.NewTool(context.Background(), &getreq.Config{
 		ToolName: "request_get",
 		ToolDesc: "获取网页内容。当你需要查看某个网页的具体内容时使用，输入应为完整的URL（例如https://www.baidu.com）。",
 		Headers: map[string]string{
 			"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 Edg/145.0.0.0",
 		},
 	})
-	if err != nil {
-		return nil, err
-	}
-	return &httpRequestToolWrapper{InvokableTool: baseTool}, nil
 }

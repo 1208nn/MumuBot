@@ -19,10 +19,13 @@ type MoodInfo struct {
 
 // PromptContext 动态 prompt 上下文
 type PromptContext struct {
-	GroupID         int64
-	MoodState       *MoodInfo         // 当前情绪状态
-	JargonMatches   map[string]string // 匹配到的黑话/梗
-	RelatedMemories []memory.Memory   // 相关记忆 (完整对象)
+	GroupID               int64
+	MoodState             *MoodInfo         // 当前情绪状态
+	JargonMatches         map[string]string // 匹配到的黑话/梗
+	GroupInfo             string
+	RelatedMemories       []memory.Memory // 当前群相关记忆
+	CrossGroupExperiences []memory.Memory // 跨群自我经历
+	StyleHints            []string
 }
 
 // Persona 人格定义
@@ -102,7 +105,7 @@ func (p *Persona) GetSystemPrompt() string {
 }
 
 // GetThinkPrompt 获取思考提示词（包含动态上下文）
-func (p *Persona) GetThinkPrompt(ctx *PromptContext, chatContext string, groupExtra string, memberInfo string) string {
+func (p *Persona) GetThinkPrompt(ctx *PromptContext, chatContext string, groupExtra string, recentPeople string) string {
 	var b strings.Builder
 
 	// 当前时间
@@ -111,6 +114,10 @@ func (p *Persona) GetThinkPrompt(ctx *PromptContext, chatContext string, groupEx
 	// 动态部分：情绪状态
 	if ctx != nil && ctx.MoodState != nil {
 		b.WriteString(p.getMoodPrompt(ctx.MoodState))
+	}
+
+	if ctx != nil && ctx.GroupInfo != "" {
+		b.WriteString(fmt.Sprintf("\n## 当前群信息\n%s\n", ctx.GroupInfo))
 	}
 
 	// 群特殊说明
@@ -150,9 +157,25 @@ func (p *Persona) GetThinkPrompt(ctx *PromptContext, chatContext string, groupEx
 		}
 	}
 
-	// 说话者信息
-	if memberInfo != "" {
-		b.WriteString(fmt.Sprintf("\n## 你了解的说话者信息\n%s\n", memberInfo))
+	if ctx != nil && len(ctx.CrossGroupExperiences) > 0 {
+		b.WriteString("\n## 你在别处的相关经历\n")
+		for _, mem := range ctx.CrossGroupExperiences {
+			b.WriteString(fmt.Sprintf("- [%s] %s\n",
+				mem.CreatedAt.Format("2006-01-02"),
+				mem.Content))
+		}
+	}
+
+	if ctx != nil && len(ctx.StyleHints) > 0 {
+		b.WriteString("\n## 可参考的群聊表达习惯\n")
+		b.WriteString("下面是这个群里在类似场景下常见的说话味道，你可以参考，但不必照抄，也不必强行使用。\n")
+		for _, hint := range ctx.StyleHints {
+			b.WriteString(fmt.Sprintf("- %s\n", hint))
+		}
+	}
+
+	if recentPeople != "" {
+		b.WriteString(fmt.Sprintf("\n## 最近在场的人\n%s\n", recentPeople))
 	}
 
 	// 行动指引

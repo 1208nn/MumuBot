@@ -163,7 +163,6 @@ type MySQLConfig struct {
 
 // MilvusConfig Milvus 向量数据库配置
 type MilvusConfig struct {
-	Enabled        bool   `yaml:"enabled"`
 	Address        string `yaml:"address"`
 	DBName         string `yaml:"db_name"`
 	CollectionName string `yaml:"collection_name"`
@@ -229,7 +228,7 @@ func Load(path string) (*Config, error) {
 		}
 		if apiKey := os.Getenv("MUMU_VISION_API_KEY"); apiKey != "" {
 			cfg.VisionLLM.APIKey = apiKey
-		} else if cfg.Embedding.APIKey == "" && cfg.LLM.APIKey != "" {
+		} else if cfg.VisionLLM.APIKey == "" && cfg.LLM.APIKey != "" {
 			cfg.VisionLLM.APIKey = cfg.LLM.APIKey
 		}
 		if token := os.Getenv("MUMU_ONEBOT_TOKEN"); token != "" {

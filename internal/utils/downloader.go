@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
@@ -26,7 +27,11 @@ type DownloadResult struct {
 // url: 图片URL
 // storageDir: 存储目录
 // maxSizeMB: 最大文件大小限制（MB），0表示不限制
-func DownloadImage(url string, storageDir string, maxSizeMB int) (*DownloadResult, error) {
+func DownloadImage(ctx context.Context, url string, storageDir string, maxSizeMB int) (*DownloadResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	// 确保存储目录存在
 	if err := os.MkdirAll(storageDir, 0755); err != nil {
 		return nil, fmt.Errorf("创建存储目录失败: %w", err)
@@ -38,7 +43,12 @@ func DownloadImage(url string, storageDir string, maxSizeMB int) (*DownloadResul
 	}
 
 	// 发起请求
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建下载请求失败: %w", err)
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("下载图片失败: %w", err)
 	}

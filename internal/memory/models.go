@@ -48,21 +48,96 @@ type MemberProfile struct {
 
 func (MemberProfile) TableName() string { return "member_profiles" }
 
-// Expression 学习到的表达方式（参考 MaiBot Expression）
-type Expression struct {
+type StyleIntent string
+
+const (
+	StyleIntentLightBanter StyleIntent = "轻松起哄"
+	StyleIntentAgreement   StyleIntent = "认同接话"
+	StyleIntentQuestioning StyleIntent = "询问推进"
+	StyleIntentCalming     StyleIntent = "安抚缓和"
+)
+
+var styleIntentSet = map[StyleIntent]struct{}{
+	StyleIntentLightBanter: {},
+	StyleIntentAgreement:   {},
+	StyleIntentQuestioning: {},
+	StyleIntentCalming:     {},
+}
+
+func IsValidStyleIntent(v string) bool {
+	_, ok := styleIntentSet[StyleIntent(v)]
+	return ok
+}
+
+func StyleIntentValues() []string {
+	return []string{
+		string(StyleIntentLightBanter),
+		string(StyleIntentAgreement),
+		string(StyleIntentQuestioning),
+		string(StyleIntentCalming),
+	}
+}
+
+type StyleTone string
+
+const (
+	StyleToneDirect     StyleTone = "直接"
+	StyleToneLight      StyleTone = "轻松"
+	StyleToneExaggerate StyleTone = "夸张"
+	StyleToneRestrained StyleTone = "克制"
+)
+
+var styleToneSet = map[StyleTone]struct{}{
+	StyleToneDirect:     {},
+	StyleToneLight:      {},
+	StyleToneExaggerate: {},
+	StyleToneRestrained: {},
+}
+
+func IsValidStyleTone(v string) bool {
+	_, ok := styleToneSet[StyleTone(v)]
+	return ok
+}
+
+func StyleToneValues() []string {
+	return []string{
+		string(StyleToneDirect),
+		string(StyleToneLight),
+		string(StyleToneExaggerate),
+		string(StyleToneRestrained),
+	}
+}
+
+type StyleCardStatus string
+
+const (
+	StyleCardStatusCandidate StyleCardStatus = "candidate"
+	StyleCardStatusActive    StyleCardStatus = "active"
+	StyleCardStatusRejected  StyleCardStatus = "rejected"
+)
+
+// StyleCard 群风格卡片
+type StyleCard struct {
 	ID        uint      `gorm:"primarykey" json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
-	GroupID   int64  `gorm:"index" json:"group_id"`
-	Situation string `gorm:"type:varchar(200)" json:"situation"` // 使用场景
-	Style     string `gorm:"type:varchar(200)" json:"style"`     // 表达风格
-	Examples  string `gorm:"type:text" json:"examples"`          // 示例 JSON
-	Checked   bool   `gorm:"default:false" json:"checked"`
-	Rejected  bool   `gorm:"default:false" json:"rejected"`
+	GroupID       int64           `gorm:"index" json:"group_id"`
+	Intent        string          `gorm:"type:varchar(32);index" json:"intent"`
+	Tone          string          `gorm:"type:varchar(32);index" json:"tone"`
+	TriggerRule   string          `gorm:"type:varchar(255)" json:"trigger_rule"`
+	AvoidRule     string          `gorm:"type:varchar(255)" json:"avoid_rule"`
+	Example       string          `gorm:"type:varchar(255)" json:"example"`
+	SourceExcerpt string          `gorm:"type:text" json:"source_excerpt"`
+	Status        StyleCardStatus `gorm:"type:varchar(20);index;default:'candidate'" json:"status"`
+	EvidenceCount int             `gorm:"default:1" json:"evidence_count"`
+	UseCount      int             `gorm:"default:0" json:"use_count"`
+	LastUsedAt    *time.Time      `json:"last_used_at,omitempty"`
 }
 
-func (Expression) TableName() string { return "expressions" }
+var styleCardTableName = "style_cards"
+
+func (StyleCard) TableName() string { return styleCardTableName }
 
 // Jargon 黑话/术语
 type Jargon struct {

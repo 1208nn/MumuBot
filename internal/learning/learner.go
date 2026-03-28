@@ -15,6 +15,7 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
+	agentflow "github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
@@ -26,7 +27,8 @@ type Learner struct {
 	auxModel  model.ToolCallingChatModel
 	tools     []tool.BaseTool
 	agent     *react.Agent
-	stopCh    chan struct{}
+	ctx       context.Context
+	cancel    context.CancelFunc
 	wg        sync.WaitGroup
 	isRunning bool
 	mu        sync.Mutex
@@ -41,9 +43,9 @@ func New(memMgr *memory.Manager, jargonMgr *jargon.Manager) (*Learner, error) {
 	var learningTools []tool.BaseTool
 	toolBuilders := []func() (tool.BaseTool, error){
 		func() (tool.BaseTool, error) { return tools.NewSaveJargonTool() },
-		func() (tool.BaseTool, error) { return tools.NewSaveExpressionTool() },
-		func() (tool.BaseTool, error) { return tools.NewGetUncheckedExpressionsTool() },
-		func() (tool.BaseTool, error) { return tools.NewReviewExpressionTool() },
+		func() (tool.BaseTool, error) { return tools.NewSaveStyleCardTool() },
+		func() (tool.BaseTool, error) { return tools.NewGetUncheckedStyleCardsTool() },
+		func() (tool.BaseTool, error) { return tools.NewReviewStyleCardTool() },
 		func() (tool.BaseTool, error) { return tools.NewGetUncheckedJargonsTool() },
 		func() (tool.BaseTool, error) { return tools.NewReviewJargonTool() },
 	}
@@ -63,8 +65,16 @@ func New(memMgr *memory.Manager, jargonMgr *jargon.Manager) (*Learner, error) {
 	}
 	agent, err := react.NewAgent(context.Background(), &react.AgentConfig{
 		ToolCallingModel: auxModel,
-		ToolsConfig:      compose.ToolsNodeConfig{Tools: learningTools},
-		MaxStep:          maxStep,
+		ToolsConfig: compose.ToolsNodeConfig{
+			Tools: learningTools,
+			ToolArgumentsHandler: func(ctx context.Context, name, arguments string) (string, error) {
+				return tools.CanonicalizeToolArguments(arguments)
+			},
+			ToolCallMiddlewares: []compose.ToolMiddleware{{
+				Invokable: tools.ToolDedupMiddleware(),
+			}},
+		},
+		MaxStep: maxStep,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("创建学习 Agent 失败: %w", err)
@@ -76,24 +86,24 @@ func New(memMgr *memory.Manager, jargonMgr *jargon.Manager) (*Learner, error) {
 		auxModel:  auxModel,
 		tools:     learningTools,
 		agent:     agent,
-		stopCh:    make(chan struct{}),
 	}
-
-	// 启动后台任务
-	l.wg.Add(1)
-	go l.runLoop()
 
 	return l, nil
 }
 
-func (l *Learner) Start() {
+func (l *Learner) Start(parent context.Context) {
 	l.mu.Lock()
 	if l.isRunning {
 		l.mu.Unlock()
 		return
 	}
+
+	if parent == nil {
+		parent = context.Background()
+	}
+
+	l.ctx, l.cancel = context.WithCancel(parent)
 	l.isRunning = true
-	l.stopCh = make(chan struct{})
 	l.mu.Unlock()
 
 	l.wg.Add(1)
@@ -103,13 +113,19 @@ func (l *Learner) Start() {
 
 func (l *Learner) Stop() {
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	if !l.isRunning {
+		l.mu.Unlock()
 		return
 	}
-	close(l.stopCh)
-	l.wg.Wait()
+
+	cancel := l.cancel
 	l.isRunning = false
+	l.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	l.wg.Wait()
 	zap.L().Info("后台学习系统已停止")
 }
 
@@ -125,7 +141,7 @@ func (l *Learner) runLoop() {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	go l.runTask()
+	l.runTask()
 
 	// 启动定期审核任务
 	reviewIntervalMinutes := cfg.Learning.ReviewIntervalMinutes
@@ -137,7 +153,7 @@ func (l *Learner) runLoop() {
 
 	for {
 		select {
-		case <-l.stopCh:
+		case <-l.ctx.Done():
 			return
 		case <-ticker.C:
 			l.runTask()
@@ -153,6 +169,9 @@ func (l *Learner) runTask() {
 		if !group.Enabled {
 			continue
 		}
+		if err := l.ctx.Err(); err != nil {
+			return
+		}
 		l.processGroup(group.GroupID)
 	}
 }
@@ -163,22 +182,32 @@ func (l *Learner) runReviewTask() {
 		if !group.Enabled {
 			continue
 		}
+		if err := l.ctx.Err(); err != nil {
+			return
+		}
 		l.processReview(group.GroupID)
 	}
 }
 
 func (l *Learner) processReview(groupID int64) {
-	prompt := `请检查当前待审核的“黑话/梗”和“表达方式”。
-你需要使用 'getUncheckedJargons' 和 'getUncheckedExpressions' 工具来获取待审核列表。
+	prompt := `请检查当前待审核的“黑话/梗”和“群聊风格卡片”。
+你需要使用 'getUncheckedJargons' 和 'getUncheckedStyleCards' 工具来获取待审核列表。
 然后，根据你的知识库判断这些内容的准确性和健康度。
-- 如果内容准确且无害，使用 'reviewJargon' 或 'reviewExpression' 通过审核 (approve=true)。
+- 如果内容准确且无害，使用 'reviewJargon' 或 'reviewStyleCard' 通过审核 (approve=true)。
 - 如果内容明显错误、垃圾信息或有害，请拒绝 (approve=false)。
 - 如果你不确定，请保持待审核状态（不做操作）。
+
+审核风格卡片时重点看：
+1. 这是不是群里可复用的说话风格，而不是具体事件内容；
+2. trigger_rule 和 avoid_rule 是否明确；
+3. 是否容易误伤、过度攻击或强烈阴阳；
+4. 例句是否短、自然、像参考味道而不是模板。
 
 注意：审核工具支持批量操作，请将同一审核结果的 ID 放入列表中一次性提交，尽量减少工具调用次数。`
 
 	// 创建学习上下文
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(l.ctx, 60*time.Second)
+	defer cancel()
 	ctx = tools.WithLearningContext(ctx, &tools.LearningContext{
 		GroupID:   groupID,
 		MemMgr:    l.memMgr,
@@ -186,9 +215,13 @@ func (l *Learner) processReview(groupID int64) {
 	})
 
 	// 调用 Agent
+	opts := []agentflow.AgentOption{}
+	if cfg := config.Get(); cfg != nil && cfg.Debug.ShowToolCalls {
+		opts = append(opts, agentflow.WithComposeOptions(compose.WithCallbacks(tools.NewToolLogHandler())))
+	}
 	_, err := l.agent.Generate(ctx, []*schema.Message{
 		schema.UserMessage(prompt),
-	})
+	}, opts...)
 	if err != nil {
 		zap.L().Error("后台审核任务失败", zap.Int64("group_id", groupID), zap.Error(err))
 		return
@@ -260,7 +293,7 @@ func (l *Learner) processGroup(groupID int64) {
 		}
 	}
 
-	prompt := fmt.Sprintf(`请分析以下 QQ 群聊天记录。你的任务是提取“黑话/梗”（该群体特有的术语、缩写、meme）和“表达方式”（说话风格、口头禅、句式）。
+	prompt := fmt.Sprintf(`请分析以下 QQ 群聊天记录。你的任务是提取“黑话/梗”（该群体特有的术语、缩写、meme）和“群聊风格卡片”（这个群在特定场景下常见的说话方式）。
 
 聊天记录：
 
@@ -270,14 +303,21 @@ func (l *Learner) processGroup(groupID int64) {
 
 要求：
 1. 识别**新的**黑话/梗。黑话的含义应该是与上下文相关的，如果无需上下文就可以推断该词的意思，则该词不是黑话。
-2. 识别独特的表达风格或口头禅。
-3. 忽略通用语言或普通词汇，专注于独特的群体文化。
-4. 使用提供的工具 'saveJargon' 和 'saveExpression' 来保存你的发现。
-5. 如果没有发现有价值的内容，请直接回复“无新发现”。
-`, chatLog.String(), knownJargons)
+2. 识别可复用的群聊风格卡片，而不是一次性内容。
+3. 风格卡片必须使用以下 intent 枚举之一：%s。
+4. 风格卡片必须使用以下 tone 枚举之一：%s。
+5. 每张风格卡片必须包含：intent、tone、trigger_rule、avoid_rule、example、source_excerpt。
+6. example 必须是短句，只作为语气味道参考，不能写成长模板。
+7. 如果无法给出明确的 trigger_rule 和 avoid_rule，就不要保存该卡片。
+8. 强攻击性、强冒犯性、强阴阳且容易误伤的表达不要保存为风格卡片。
+9. 忽略通用语言或普通词汇，专注于独特的群体文化。
+10. 使用提供的工具 'saveJargon' 和 'saveStyleCard' 来保存你的发现。
+11. 如果没有发现有价值的内容，请直接回复“无新发现”。
+`, chatLog.String(), knownJargons, strings.Join(memory.StyleIntentValues(), "、"), strings.Join(memory.StyleToneValues(), "、"))
 
 	// 创建学习上下文
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(l.ctx, 90*time.Second)
+	defer cancel()
 	ctx = tools.WithLearningContext(ctx, &tools.LearningContext{
 		GroupID:   groupID,
 		MemMgr:    l.memMgr,
@@ -285,9 +325,13 @@ func (l *Learner) processGroup(groupID int64) {
 	})
 
 	// 调用 Agent
+	opts := []agentflow.AgentOption{}
+	if cfg := config.Get(); cfg != nil && cfg.Debug.ShowToolCalls {
+		opts = append(opts, agentflow.WithComposeOptions(compose.WithCallbacks(tools.NewToolLogHandler())))
+	}
 	_, err = l.agent.Generate(ctx, []*schema.Message{
 		schema.UserMessage(prompt),
-	})
+	}, opts...)
 	if err != nil {
 		zap.L().Error("后台学习任务失败", zap.Int64("group_id", groupID), zap.Error(err))
 		return

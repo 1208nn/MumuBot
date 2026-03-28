@@ -25,22 +25,32 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
+	flowagent "github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
 )
 
+const (
+	agentThinkTimeout          = 60 * time.Second
+	styleClassificationTimeout = 20 * time.Second
+)
+
 // Agent 沐沐智能体
 type Agent struct {
-	persona        *persona.Persona
-	memory         *memory.Manager
-	model          model.ToolCallingChatModel
-	vision         *llm.VisionClient // 多模态视觉模型
-	bot            *onebot.Client
-	react          *react.Agent
-	tools          []tool.BaseTool
-	mcpMgr         *mcp.Manager        // MCP 管理器
-	concurrencyMgr *ConcurrencyManager // 并发管理器
+	ctx             context.Context
+	cancel          context.CancelFunc
+	persona         *persona.Persona
+	memory          *memory.Manager
+	model           model.ToolCallingChatModel
+	auxModel        model.ToolCallingChatModel
+	vision          *llm.VisionClient // 多模态视觉模型
+	bot             *onebot.Client
+	react           *react.Agent
+	styleClassifier *react.Agent
+	tools           []tool.BaseTool
+	mcpMgr          *mcp.Manager        // MCP 管理器
+	concurrencyMgr  *ConcurrencyManager // 并发管理器
 
 	jargonMgr *jargon.Manager   // 黑话管理器
 	learner   *learning.Learner // 后台学习系统
@@ -58,8 +68,7 @@ type Agent struct {
 	lastProcessedTime map[int64]time.Time
 	processingMu      sync.RWMutex
 
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	wg sync.WaitGroup
 }
 
 type pendingThink struct {
@@ -69,51 +78,93 @@ type pendingThink struct {
 }
 
 // New 创建 Agent
-func New(
-	p *persona.Persona,
-	mem *memory.Manager,
-	m model.ToolCallingChatModel,
-	vision *llm.VisionClient,
-	bot *onebot.Client,
-) (*Agent, error) {
+func New(mem *memory.Manager) (*Agent, error) {
+	cfg := config.Get()
+	if cfg == nil {
+		return nil, fmt.Errorf("配置未加载")
+	}
+
+	p := persona.NewPersona(&cfg.Persona)
+
+	chatModel, err := llm.NewClient()
+	if err != nil {
+		return nil, fmt.Errorf("创建 LLM 客户端失败: %w", err)
+	}
+	zap.L().Info("LLM 已连接", zap.String("model", cfg.LLM.Model), zap.String("base_url", cfg.LLM.BaseURL))
+
+	var visionClient *llm.VisionClient
+	if cfg.VisionLLM.Enabled {
+		visionClient, err = llm.NewVisionClient()
+		if err != nil {
+			zap.L().Error("Vision 客户端创建失败，视觉理解不可用", zap.Error(err))
+		} else if visionClient != nil {
+			zap.L().Info("Vision 已启用", zap.String("model", cfg.VisionLLM.Model))
+		}
+	}
+
+	botClient := onebot.NewClient()
+	if err := botClient.Connect(); err != nil {
+		return nil, fmt.Errorf("OneBot 连接失败: %w", err)
+	}
+
+	rootCtx, cancel := context.WithCancel(context.Background())
 	a := &Agent{
+		ctx:               rootCtx,
+		cancel:            cancel,
 		persona:           p,
 		memory:            mem,
-		model:             m,
-		vision:            vision,
-		bot:               bot,
+		model:             chatModel,
+		vision:            visionClient,
+		bot:               botClient,
 		buffers:           make(map[int64]*utils.RingBuffer[*onebot.GroupMessage]),
 		pendingThinks:     make(map[int64]*pendingThink),
 		processing:        make(map[int64]bool),
 		lastProcessedTime: make(map[int64]time.Time),
-		stopCh:            make(chan struct{}),
 	}
-	cfg := config.Get()
+
+	zap.L().Info("人格已加载", zap.String("name", a.persona.GetName()))
+
+	if auxModel, err := llm.NewAuxClient(); err == nil {
+		a.auxModel = auxModel
+	} else {
+		zap.L().Debug("初始化辅助分类模型失败，将回退主模型", zap.Error(err))
+	}
 
 	// 初始化并发管理器
-	a.concurrencyMgr = NewConcurrencyManager(cfg.Agent.MaxCoroutine, a.think)
+	a.concurrencyMgr = NewConcurrencyManager(a.ctx, cfg.Agent.MaxCoroutine, a.think)
 
 	// 初始化黑话管理器
 	a.jargonMgr = jargon.New(mem)
 
 	// 初始化后台学习系统
-	learner, err := learning.New(mem, a.jargonMgr)
-	if err != nil {
-		zap.L().Error("初始化后台学习系统失败", zap.Error(err))
-	} else {
-		a.learner = learner
+	if cfg.Learning.Enabled {
+		learner, err := learning.New(mem, a.jargonMgr)
+		if err != nil {
+			zap.L().Error("初始化后台学习系统失败", zap.Error(err))
+		} else {
+			a.learner = learner
+		}
 	}
 
 	// 初始化 MCP 管理器
 	a.mcpMgr = mcp.NewMCPManager()
-	if err := a.mcpMgr.LoadFromConfig("config/mcp.json"); err != nil {
+	if err := a.mcpMgr.LoadFromConfig(a.ctx, "config/mcp.json"); err != nil {
 		zap.L().Error("加载 MCP 配置失败", zap.Error(err))
 	}
 
 	if err := a.initTools(); err != nil {
+		a.bot.Close()
+		a.cancel()
 		return nil, err
 	}
 	if err := a.initReact(); err != nil {
+		a.bot.Close()
+		a.cancel()
+		return nil, err
+	}
+	if err := a.initStyleClassifier(); err != nil {
+		a.bot.Close()
+		a.cancel()
 		return nil, err
 	}
 	return a, nil
@@ -126,7 +177,7 @@ func (a *Agent) initTools() error {
 		func() (tool.BaseTool, error) { return tools.NewQueryMemoryTool() },
 		// 搜索黑话/表达
 		func() (tool.BaseTool, error) { return tools.NewSearchJargonTool() },
-		func() (tool.BaseTool, error) { return tools.NewSearchExpressionsTool() },
+		func() (tool.BaseTool, error) { return tools.NewSearchStyleCardsTool() },
 		// 用户信息
 		func() (tool.BaseTool, error) { return tools.NewUpdateMemberProfileTool() },
 		func() (tool.BaseTool, error) { return tools.NewGetMemberInfoTool() },
@@ -135,7 +186,6 @@ func (a *Agent) initTools() error {
 		func() (tool.BaseTool, error) { return tools.NewSpeakTool() },
 		func() (tool.BaseTool, error) { return tools.NewStayQuietTool() },
 		// 群交互
-		func() (tool.BaseTool, error) { return tools.NewGetGroupInfoTool() },
 		func() (tool.BaseTool, error) { return tools.NewGetGroupMemberDetailTool() },
 		func() (tool.BaseTool, error) { return tools.NewPokeTool() },
 		func() (tool.BaseTool, error) { return tools.NewReactToMessageTool() },
@@ -178,9 +228,18 @@ func (a *Agent) initReact() error {
 	if maxStep <= 0 {
 		maxStep = 12 // 默认最大步数
 	}
-	agent, err := react.NewAgent(context.Background(), &react.AgentConfig{
-		ToolCallingModel:   a.model,
-		ToolsConfig:        compose.ToolsNodeConfig{Tools: a.tools, ExecuteSequentially: true},
+	agent, err := react.NewAgent(a.ctx, &react.AgentConfig{
+		ToolCallingModel: a.model,
+		ToolsConfig: compose.ToolsNodeConfig{
+			Tools:               a.tools,
+			ExecuteSequentially: true,
+			ToolArgumentsHandler: func(ctx context.Context, name, arguments string) (string, error) {
+				return tools.CanonicalizeToolArguments(arguments)
+			},
+			ToolCallMiddlewares: []compose.ToolMiddleware{{
+				Invokable: tools.ToolDedupMiddleware(),
+			}},
+		},
 		MaxStep:            maxStep,
 		ToolReturnDirectly: map[string]struct{}{"stayQuiet": {}},
 	})
@@ -191,10 +250,41 @@ func (a *Agent) initReact() error {
 	return nil
 }
 
+func (a *Agent) initStyleClassifier() error {
+	classifier := a.auxModel
+	if classifier == nil {
+		classifier = a.model
+	}
+	if classifier == nil {
+		return fmt.Errorf("分类模型未初始化")
+	}
+
+	classificationTool, err := tools.NewStyleClassificationTool()
+	if err != nil {
+		return err
+	}
+
+	agent, err := react.NewAgent(a.ctx, &react.AgentConfig{
+		ToolCallingModel: classifier,
+		ToolsConfig: compose.ToolsNodeConfig{
+			Tools:               []tool.BaseTool{classificationTool},
+			ExecuteSequentially: true,
+		},
+		MaxStep:            4,
+		ToolReturnDirectly: map[string]struct{}{tools.StyleClassificationToolName: {}},
+	})
+	if err != nil {
+		return err
+	}
+
+	a.styleClassifier = agent
+	return nil
+}
+
 // Start 启动
 func (a *Agent) Start() {
-	if a.learner != nil {
-		a.learner.Start()
+	if config.Get().Learning.Enabled && a.learner != nil {
+		a.learner.Start(a.ctx)
 	}
 
 	// 启动时从数据库加载历史消息到缓冲区
@@ -263,11 +353,17 @@ func (a *Agent) loadBuffersFromDB() {
 
 // Stop 停止
 func (a *Agent) Stop() {
+	a.cancel()
+	a.clearPendingThinks()
+	if a.bot != nil {
+		_ = a.bot.Close()
+	}
 	if a.learner != nil {
 		a.learner.Stop()
 	}
-	close(a.stopCh)
-	a.clearPendingThinks()
+	if a.concurrencyMgr != nil {
+		a.concurrencyMgr.Close()
+	}
 	a.wg.Wait()
 	// 关闭 MCP 连接
 	if a.mcpMgr != nil {
@@ -277,6 +373,9 @@ func (a *Agent) Stop() {
 }
 
 func (a *Agent) onMessage(msg *onebot.GroupMessage) {
+	if err := a.ctx.Err(); err != nil {
+		return
+	}
 	cfg := config.Get()
 	if !cfg.IsGroupEnabled(msg.GroupID) {
 		return
@@ -299,7 +398,7 @@ func (a *Agent) onMessage(msg *onebot.GroupMessage) {
 
 	// 防止注入工具名字
 	for _, t := range a.tools {
-		info, _ := t.Info(context.Background())
+		info, _ := t.Info(a.ctx)
 		parsedContent = strings.ReplaceAll(parsedContent, info.Name, "\"危险指令，已屏蔽\"")
 	}
 
@@ -321,14 +420,22 @@ func (a *Agent) onMessage(msg *onebot.GroupMessage) {
 		return
 	}
 
-	go a.updateMember(msg)
+	if err := a.ctx.Err(); err != nil {
+		return
+	}
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		a.updateMember(msg)
+	}()
 
 	a.scheduleThink(msg.GroupID, isMentioned, false)
 }
 
 // parseMessageContent 解析消息内容（图片、视频、表情、回复等）
 func (a *Agent) parseMessageContent(msg *onebot.GroupMessage) string {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
 
 	// 构建回复信息
 	replyInfo := ""
@@ -372,8 +479,12 @@ func (a *Agent) parseMessageContent(msg *onebot.GroupMessage) string {
 				desc = img.Summary
 			}
 			// 自动保存表情包
-			if img.URL != "" && config.Get().Sticker.AutoSave {
-				go a.autoSaveSticker(img.URL, desc)
+			if img.URL != "" && config.Get().Sticker.AutoSave && a.ctx.Err() == nil {
+				a.wg.Add(1)
+				go func(url string, stickerDesc string) {
+					defer a.wg.Done()
+					a.autoSaveSticker(a.ctx, url, stickerDesc)
+				}(img.URL, desc)
 			}
 			if desc != "" {
 				content += fmt.Sprintf(" [表情包:%s]", desc)
@@ -448,6 +559,9 @@ func (a *Agent) getBuffer(groupID int64) []*onebot.GroupMessage {
 }
 
 func (a *Agent) updateMember(msg *onebot.GroupMessage) {
+	if err := a.ctx.Err(); err != nil {
+		return
+	}
 	p, err := a.memory.GetOrCreateMemberProfile(msg.UserID, msg.Nickname)
 	if err != nil {
 		zap.L().Error("获取成员画像失败", zap.Error(err))
@@ -467,7 +581,7 @@ func (a *Agent) thinkLoop() {
 	defer ticker.Stop()
 	for {
 		select {
-		case <-a.stopCh:
+		case <-a.ctx.Done():
 			return
 		case <-ticker.C:
 			a.thinkCycle()
@@ -659,6 +773,9 @@ func (a *Agent) getSpeakProbability(groupID int64) float64 {
 
 // think 提交思考任务
 func (a *Agent) think(groupID int64, isMention bool) {
+	if err := a.ctx.Err(); err != nil {
+		return
+	}
 	if a.bot.IsSelfMuted(groupID) {
 		return
 	}
@@ -679,15 +796,15 @@ func (a *Agent) think(groupID int64, isMention bool) {
 		a.processingMu.Unlock()
 	}()
 
-	ctx := tools.WithToolContext(context.Background(), &tools.ToolContext{
+	ctx := tools.WithToolContext(a.ctx, &tools.ToolContext{
 		GroupID:   groupID,
 		MemoryMgr: a.memory,
 		Bot:       a.bot,
-		SpeakCallback: func(gid int64, content string, replyTo int64, mentions []int64) (int64, error) {
-			return a.doSpeak(gid, content, replyTo, mentions)
+		SpeakCallback: func(callCtx context.Context, gid int64, content string, replyTo int64, mentions []int64) (int64, error) {
+			return a.doSpeak(callCtx, gid, content, replyTo, mentions)
 		},
-		SendStickerCallback: func(gid int64, filePath string, description string) (int64, error) {
-			return a.doSendSticker(gid, filePath, description)
+		SendStickerCallback: func(callCtx context.Context, gid int64, filePath string, description string) (int64, error) {
+			return a.doSendSticker(callCtx, gid, filePath, description)
 		},
 	})
 
@@ -701,31 +818,11 @@ func (a *Agent) think(groupID int64, isMention bool) {
 	promptCtx := &persona.PromptContext{
 		GroupID: groupID,
 	}
+	promptCtx.GroupInfo = a.buildGroupContext(groupID)
 
 	// 主动记忆检索
 	if config.Get().Agent.EnableActiveRetrieval {
-		threshold := 0.7
-
-		// 获取上下文消息内容
-		msgs := a.getBuffer(groupID)
-		var contentBuilder strings.Builder
-		for _, m := range msgs {
-			if m.Content == "" {
-				continue
-			}
-			contentBuilder.WriteString(m.Content)
-		}
-
-		// 向量搜索
-		if contentBuilder.Len() > 0 {
-			memories, err := a.memory.SearchSimilarMemories(ctx, contentBuilder.String(), 0, threshold)
-			if err != nil {
-				zap.L().Warn("主动记忆检索失败", zap.Error(err))
-			} else if len(memories) > 0 {
-				promptCtx.RelatedMemories = memories
-				zap.L().Debug("主动记忆检索成功", zap.Int("count", len(memories)))
-			}
-		}
+		promptCtx.RelatedMemories, promptCtx.CrossGroupExperiences = a.buildMemoryContext(ctx, groupID)
 	}
 
 	// 获取当前情绪状态
@@ -741,9 +838,10 @@ func (a *Agent) think(groupID int64, isMention bool) {
 	if a.jargonMgr != nil {
 		promptCtx.JargonMatches = a.jargonMgr.Match(chatContext)
 	}
+	promptCtx.StyleHints = a.buildStyleHintContext(ctx, groupID)
 
-	// 获取说话者信息
-	memberInfo := a.getMemberInfo(groupID)
+	// 获取最近在场的人
+	recentPeople := a.buildRecentPeopleContext(groupID)
 
 	// 构建消息
 	systemPrompt := a.persona.GetSystemPrompt()
@@ -754,7 +852,7 @@ func (a *Agent) think(groupID int64, isMention bool) {
 		groupExtra = gc.ExtraPrompt
 	}
 
-	thinkPrompt := a.persona.GetThinkPrompt(promptCtx, chatContext, groupExtra, memberInfo)
+	thinkPrompt := a.persona.GetThinkPrompt(promptCtx, chatContext, groupExtra, recentPeople)
 	if isMention {
 		thinkPrompt += "\n\n注意：有人提到你了，可能在找你说话，你可以看情况回复。"
 	}
@@ -771,15 +869,21 @@ func (a *Agent) think(groupID int64, isMention bool) {
 	}
 
 	// 设置超时时间（默认60秒），防止LLM请求无限阻塞
-	timeout := 60 * time.Second
-	ctxWithTimeout, cancelTimeout := context.WithTimeout(ctx, timeout)
+	ctxWithTimeout, cancelTimeout := context.WithTimeout(ctx, agentThinkTimeout)
 	defer cancelTimeout()
 
-	result, err := a.react.Generate(ctxWithTimeout, msgs)
+	opts := make([]flowagent.AgentOption, 0, 1)
+	if cfg := config.Get(); cfg != nil && cfg.Debug.ShowToolCalls {
+		opts = append(opts, flowagent.WithComposeOptions(compose.WithCallbacks(tools.NewToolLogHandler())))
+	}
+
+	result, err := a.react.Generate(ctxWithTimeout, msgs, opts...)
 	if err != nil {
 		// 区分是超时还是主动取消（stayQuiet）
 		if errors.Is(ctxWithTimeout.Err(), context.DeadlineExceeded) {
-			zap.L().Warn("思考超时", zap.Int64("group_id", groupID), zap.Duration("timeout", timeout))
+			zap.L().Warn("思考超时", zap.Int64("group_id", groupID), zap.Duration("timeout", agentThinkTimeout))
+		} else if errors.Is(ctxWithTimeout.Err(), context.Canceled) || errors.Is(a.ctx.Err(), context.Canceled) {
+			zap.L().Debug("思考已取消", zap.Int64("group_id", groupID))
 		} else {
 			zap.L().Error("思考失败", zap.Int64("group_id", groupID), zap.Error(err))
 		}
@@ -789,6 +893,225 @@ func (a *Agent) think(groupID int64, isMention bool) {
 	if config.Get().Debug.ShowThinking && result != nil && result.Content != "" {
 		zap.L().Debug("Agent 输出", zap.Int64("group_id", groupID), zap.String("content", result.Content))
 	}
+}
+
+func (a *Agent) buildGroupContext(groupID int64) string {
+	if a.bot == nil {
+		return ""
+	}
+
+	ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	defer cancel()
+
+	info, err := a.bot.GetGroupInfo(ctx, groupID, false)
+	if err != nil {
+		zap.L().Debug("获取群基础信息失败", zap.Int64("group_id", groupID), zap.Error(err))
+		return ""
+	}
+
+	if info == nil {
+		return ""
+	}
+
+	var parts []string
+	if info.GroupName != "" {
+		parts = append(parts, fmt.Sprintf("- 群名: %s", info.GroupName))
+	}
+	if info.MaxMemberCount > 0 {
+		parts = append(parts, fmt.Sprintf("- 群人数: %d/%d", info.MemberCount, info.MaxMemberCount))
+	} else if info.MemberCount > 0 {
+		parts = append(parts, fmt.Sprintf("- 群人数: %d", info.MemberCount))
+	}
+
+	return strings.Join(parts, "\n")
+}
+
+func (a *Agent) buildMemoryContext(ctx context.Context, groupID int64) ([]memory.Memory, []memory.Memory) {
+	msgs := a.getBuffer(groupID)
+	if len(msgs) == 0 {
+		return nil, nil
+	}
+
+	query := collectTextContext(msgs)
+	if query == "" {
+		return nil, nil
+	}
+
+	const threshold = 0.7
+
+	local, err := a.memory.SearchSimilarMemories(ctx, query, groupID, "", 4, threshold)
+	if err != nil {
+		zap.L().Warn("本群主动记忆检索失败", zap.Int64("group_id", groupID), zap.Error(err))
+		return nil, nil
+	}
+
+	crossLimit := 0
+	switch {
+	case len(local) == 0:
+		crossLimit = 2
+	case len(local) == 1:
+		crossLimit = 1
+	}
+	if crossLimit == 0 {
+		return local, nil
+	}
+
+	cross, err := a.memory.SearchSimilarMemories(ctx, query, 0, memory.MemoryTypeSelfExperience, 4, threshold)
+	if err != nil {
+		zap.L().Warn("跨群自我经历检索失败", zap.Int64("group_id", groupID), zap.Error(err))
+		return local, nil
+	}
+
+	seen := make(map[uint]struct{}, len(local))
+	for _, mem := range local {
+		seen[mem.ID] = struct{}{}
+	}
+
+	result := make([]memory.Memory, 0, crossLimit)
+	for _, mem := range cross {
+		if crossLimit <= 0 {
+			break
+		}
+		if _, ok := seen[mem.ID]; ok {
+			continue
+		}
+		seen[mem.ID] = struct{}{}
+		result = append(result, mem)
+		if len(result) >= crossLimit {
+			break
+		}
+	}
+
+	return local, result
+}
+
+func collectTextContext(msgs []*onebot.GroupMessage) string {
+	if len(msgs) == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0, len(msgs))
+	for _, msg := range msgs {
+		text := strings.TrimSpace(msg.Content)
+		if text == "" {
+			continue
+		}
+		parts = append(parts, text)
+	}
+
+	return strings.Join(parts, "\n")
+}
+
+func (a *Agent) buildStyleHintContext(ctx context.Context, groupID int64) []string {
+	classification, err := a.classifyStyleContext(ctx, groupID)
+	if err != nil || classification == nil {
+		if err != nil {
+			zap.L().Debug("群风格分类失败", zap.Int64("group_id", groupID), zap.Error(err))
+		}
+		return nil
+	}
+
+	cards, err := a.memory.ListActiveStyleCardsByIntent(classification.Intent, groupID, classification.Tone, 3)
+	if err != nil {
+		zap.L().Warn("查询风格卡片失败", zap.Int64("group_id", groupID), zap.Error(err))
+		return nil
+	}
+	if len(cards) == 0 {
+		return nil
+	}
+
+	hints := buildStyleHints(classification.Intent, cards)
+	usedIDs := make([]uint, 0, len(cards))
+	for _, card := range cards {
+		usedIDs = append(usedIDs, card.ID)
+	}
+	if err := a.memory.IncrementStyleCardUsage(usedIDs); err != nil {
+		zap.L().Debug("更新风格卡片使用计数失败", zap.Int64("group_id", groupID), zap.Error(err))
+	}
+
+	return hints
+}
+
+func (a *Agent) classifyStyleContext(ctx context.Context, groupID int64) (*tools.StyleClassification, error) {
+	contextText := collectTextContext(a.getBuffer(groupID))
+	if contextText == "" {
+		return nil, fmt.Errorf("没有可分类的文字消息")
+	}
+	if a.styleClassifier == nil {
+		return nil, fmt.Errorf("分类 Agent 未初始化")
+	}
+
+	systemPrompt := fmt.Sprintf("你负责给QQ群聊天上下文做风格分类。你必须调用一次 %s 工具提交结果，不要输出普通文本。intent 只能是：%s。tone 只能是：%s。",
+		tools.StyleClassificationToolName,
+		strings.Join(memory.StyleIntentValues(), "、"),
+		strings.Join(memory.StyleToneValues(), "、"),
+	)
+	userPrompt := fmt.Sprintf("请根据下面的聊天内容，判断更适合参考的群聊风格标签，并调用工具提交。\n聊天内容：\n%s", contextText)
+
+	result := &tools.StyleClassification{}
+	classifyCtx := tools.WithStyleClassificationTarget(ctx, result)
+	classifyCtx, cancel := context.WithTimeout(classifyCtx, styleClassificationTimeout)
+	defer cancel()
+
+	styleOptions := []flowagent.AgentOption{
+		flowagent.WithComposeOptions(
+			compose.WithChatModelOption(model.WithToolChoice(schema.ToolChoiceForced, tools.StyleClassificationToolName)),
+		),
+	}
+	if cfg := config.Get(); cfg != nil && cfg.Debug.ShowToolCalls {
+		styleOptions = append(styleOptions, flowagent.WithComposeOptions(compose.WithCallbacks(tools.NewToolLogHandler())))
+	}
+
+	_, err := a.styleClassifier.Generate(classifyCtx, []*schema.Message{
+		schema.SystemMessage(systemPrompt),
+		schema.UserMessage(userPrompt),
+	}, styleOptions...)
+	if err != nil {
+		return nil, err
+	}
+	if result.Intent == "" || result.Tone == "" {
+		return nil, fmt.Errorf("分类工具未返回结果")
+	}
+
+	return result, nil
+}
+
+func buildStyleHints(intent string, cards []memory.StyleCard) []string {
+	hints := make([]string, 0, len(cards)+1)
+	hints = append(hints, "当前推荐发言方向："+intent)
+	for _, card := range cards {
+		hints = append(hints, formatStyleHint(card))
+	}
+	return hints
+}
+
+func formatStyleHint(card memory.StyleCard) string {
+	hint := fmt.Sprintf(
+		"想说得%s一点时，可在%s的时候像“%s”这样接话，但%s时别这么说",
+		card.Tone,
+		card.TriggerRule,
+		card.Example,
+		card.AvoidRule,
+	)
+
+	if strings.TrimSpace(card.SourceExcerpt) == "" {
+		return hint
+	}
+
+	rawItems := strings.Split(card.SourceExcerpt, "|")
+	sourceItems := make([]string, 0, len(rawItems))
+	for _, item := range rawItems {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		sourceItems = append(sourceItems, item)
+	}
+	if len(sourceItems) == 0 {
+		return hint
+	}
+
+	return hint + "，可参考群里人说过的原话：" + strings.Join(sourceItems, " / ")
 }
 
 // buildChatContext 构建聊天上下文
@@ -808,38 +1131,87 @@ func (a *Agent) buildChatContext(groupID int64, lastProcessedTime time.Time) str
 	return b.String()
 }
 
-// getMemberInfo 获取当前说话者信息
-func (a *Agent) getMemberInfo(groupID int64) string {
+// buildRecentPeopleContext 获取最近在场的人
+func (a *Agent) buildRecentPeopleContext(groupID int64) string {
 	msgs := a.getBuffer(groupID)
 	if len(msgs) == 0 {
 		return ""
 	}
 
-	// 获取最后一个说话者的信息
-	lastMsg := msgs[len(msgs)-1]
-	profile, err := a.memory.GetMemberProfile(lastMsg.UserID)
-	if err != nil {
+	seenIDs := make(map[int64]struct{}, 3)
+	ids := make([]int64, 0, 3)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		userID := msgs[i].UserID
+		if userID == 0 || userID == a.bot.GetSelfID() {
+			continue
+		}
+		if _, ok := seenIDs[userID]; ok {
+			continue
+		}
+		seenIDs[userID] = struct{}{}
+		ids = append(ids, userID)
+		if len(ids) >= 3 {
+			break
+		}
+	}
+	if len(ids) == 0 {
 		return ""
 	}
 
-	var parts []string
-	parts = append(parts, fmt.Sprintf("昵称: %s", profile.Nickname))
-	parts = append(parts, fmt.Sprintf("活跃度（0-1）: %.2f", profile.Activity))
-	parts = append(parts, fmt.Sprintf("你与他的亲密度（0-1）: %.2f", profile.Intimacy))
-	if profile.SpeakStyle != "" {
-		parts = append(parts, fmt.Sprintf("说话风格: %s", profile.SpeakStyle))
+	latestNicknames := make(map[int64]string, len(ids))
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if _, ok := latestNicknames[msgs[i].UserID]; ok {
+			continue
+		}
+		latestNicknames[msgs[i].UserID] = msgs[i].Nickname
 	}
-	if profile.Interests != "" {
-		parts = append(parts, fmt.Sprintf("兴趣: %s", profile.Interests))
+
+	lines := make([]string, 0, len(ids))
+	for _, userID := range ids {
+		nickname := latestNicknames[userID]
+		profile, err := a.memory.GetMemberProfile(userID)
+		if err != nil {
+			if nickname == "" {
+				nickname = fmt.Sprintf("%d", userID)
+			}
+			lines = append(lines, fmt.Sprintf("- %s：最近在场。", nickname))
+			continue
+		}
+
+		displayName := profile.Nickname
+		if displayName == "" {
+			displayName = nickname
+		}
+		if displayName == "" {
+			displayName = fmt.Sprintf("%d", userID)
+		}
+
+		details := []string{
+			fmt.Sprintf("亲密度 %.2f", profile.Intimacy),
+			fmt.Sprintf("活跃度 %.2f", profile.Activity),
+		}
+		if profile.SpeakStyle != "" {
+			details = append(details, "风格: "+profile.SpeakStyle)
+		}
+		interests := strings.TrimSpace(profile.Interests)
+		if interests != "" {
+			var items []string
+			if err := sonic.UnmarshalString(interests, &items); err == nil && len(items) > 0 {
+				interests = strings.Join(items, "、")
+			}
+		}
+		if interests != "" {
+			details = append(details, "兴趣: "+interests)
+		}
+
+		lines = append(lines, fmt.Sprintf("- %s：%s。", displayName, strings.Join(details, "，")))
 	}
-	if !profile.LastSpeak.IsZero() {
-		parts = append(parts, fmt.Sprintf("上次发言时间: %s", profile.LastSpeak.Format(time.DateTime)))
-	}
-	return strings.Join(parts, ", ")
+
+	return strings.Join(lines, "\n")
 }
 
 // doSpeak 执行发言，返回消息ID
-func (a *Agent) doSpeak(groupID int64, content string, replyTo int64, mentions []int64) (int64, error) {
+func (a *Agent) doSpeak(ctx context.Context, groupID int64, content string, replyTo int64, mentions []int64) (int64, error) {
 	// 模拟打字延迟
 	cfg := config.Get()
 	if cfg.Chat.TypingSimulation {
@@ -854,10 +1226,18 @@ func (a *Agent) doSpeak(groupID int64, content string, replyTo int64, mentions [
 		if delay < 500*time.Millisecond {
 			delay = 500 * time.Millisecond
 		}
-		time.Sleep(delay)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return 0, ctx.Err()
+		case <-timer.C:
+		}
 	}
 
-	msgID, err := a.bot.SendGroupMessage(groupID, content, replyTo, mentions)
+	msgID, err := a.bot.SendGroupMessage(ctx, groupID, content, replyTo, mentions)
 	if err != nil {
 		zap.L().Error("发言失败", zap.Int64("group_id", groupID), zap.Error(err))
 		return 0, err
@@ -878,8 +1258,8 @@ func (a *Agent) doSpeak(groupID int64, content string, replyTo int64, mentions [
 }
 
 // doSendSticker 执行发送表情包，并记录消息
-func (a *Agent) doSendSticker(groupID int64, filePath string, description string) (int64, error) {
-	msgID, err := a.bot.SendImageMessage(groupID, filePath, true)
+func (a *Agent) doSendSticker(ctx context.Context, groupID int64, filePath string, description string) (int64, error) {
+	msgID, err := a.bot.SendImageMessage(ctx, groupID, filePath, true)
 	if err != nil {
 		zap.L().Error("发送表情包失败", zap.Int64("group_id", groupID), zap.String("path", filePath), zap.Error(err))
 		return 0, err
@@ -910,8 +1290,11 @@ func (a *Agent) doSendSticker(groupID int64, filePath string, description string
 }
 
 // autoSaveSticker 自动保存表情包（异步执行）
-func (a *Agent) autoSaveSticker(url string, description string) {
+func (a *Agent) autoSaveSticker(ctx context.Context, url string, description string) {
 	if url == "" {
+		return
+	}
+	if err := ctx.Err(); err != nil {
 		return
 	}
 
@@ -927,9 +1310,13 @@ func (a *Agent) autoSaveSticker(url string, description string) {
 	}
 
 	// 下载图片
-	result, err := utils.DownloadImage(url, storagePath, maxSizeMB)
+	result, err := utils.DownloadImage(ctx, url, storagePath, maxSizeMB)
 	if err != nil {
 		zap.L().Debug("下载表情包失败", zap.String("url", url), zap.Error(err))
+		return
+	}
+	if err := ctx.Err(); err != nil {
+		_ = os.Remove(result.FilePath)
 		return
 	}
 

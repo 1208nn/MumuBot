@@ -9,29 +9,33 @@ import (
 	"github.com/cloudwego/eino/components/tool/utils"
 )
 
-// ==================== 审核表达方式工具 ====================
+// ==================== 审核风格卡片工具 ====================
 
-type GetUncheckedExpressionsInput struct {
+type GetUncheckedStyleCardsInput struct {
 	Limit int `json:"limit,omitempty" jsonschema:"description=返回数量，默认5"`
 }
 
-type UncheckedExpressionItem struct {
-	ID        uint   `json:"id"`
-	Situation string `json:"situation"`
-	Style     string `json:"style"`
-	Examples  string `json:"examples"`
+type UncheckedStyleCardItem struct {
+	ID            uint   `json:"id"`
+	Intent        string `json:"intent"`
+	Tone          string `json:"tone"`
+	TriggerRule   string `json:"trigger_rule"`
+	AvoidRule     string `json:"avoid_rule"`
+	Example       string `json:"example"`
+	SourceExcerpt string `json:"source_excerpt"`
+	EvidenceCount int    `json:"evidence_count"`
 }
 
-type GetUncheckedExpressionsOutput struct {
-	Success     bool                      `json:"success"`
-	Expressions []UncheckedExpressionItem `json:"expressions,omitempty"`
-	Message     string                    `json:"message,omitempty"`
+type GetUncheckedStyleCardsOutput struct {
+	Success bool                     `json:"success"`
+	Cards   []UncheckedStyleCardItem `json:"cards,omitempty"`
+	Message string                   `json:"message,omitempty"`
 }
 
-func getUncheckedExpressionsFunc(ctx context.Context, input *GetUncheckedExpressionsInput) (*GetUncheckedExpressionsOutput, error) {
+func getUncheckedStyleCardsFunc(ctx context.Context, input *GetUncheckedStyleCardsInput) (*GetUncheckedStyleCardsOutput, error) {
 	lc := GetLearningContext(ctx)
 	if lc == nil {
-		return &GetUncheckedExpressionsOutput{Success: false, Message: "学习上下文未初始化"}, nil
+		return &GetUncheckedStyleCardsOutput{Success: false, Message: "学习上下文未初始化"}, nil
 	}
 
 	limit := input.Limit
@@ -39,154 +43,165 @@ func getUncheckedExpressionsFunc(ctx context.Context, input *GetUncheckedExpress
 		limit = 5
 	}
 
-	exps, err := lc.MemMgr.GetUncheckedExpressions(lc.GroupID, limit)
+	cards, err := lc.MemMgr.ListUncheckedStyleCards(lc.GroupID, limit)
 	if err != nil {
-		output := &GetUncheckedExpressionsOutput{Success: false, Message: err.Error()}
-		LogToolCall("getUncheckedExpressions", input, output, err)
-		return output, nil
+		return &GetUncheckedStyleCardsOutput{Success: false, Message: err.Error()}, nil
 	}
 
-	results := make([]UncheckedExpressionItem, 0, len(exps))
-	for _, e := range exps {
-		results = append(results, UncheckedExpressionItem{
-			ID:        e.ID,
-			Situation: e.Situation,
-			Style:     e.Style,
-			Examples:  e.Examples,
+	results := make([]UncheckedStyleCardItem, 0, len(cards))
+	for _, card := range cards {
+		results = append(results, UncheckedStyleCardItem{
+			ID:            card.ID,
+			Intent:        card.Intent,
+			Tone:          card.Tone,
+			TriggerRule:   card.TriggerRule,
+			AvoidRule:     card.AvoidRule,
+			Example:       card.Example,
+			SourceExcerpt: card.SourceExcerpt,
+			EvidenceCount: card.EvidenceCount,
 		})
 	}
 
-	output := &GetUncheckedExpressionsOutput{Success: true, Expressions: results}
-	LogToolCall("getUncheckedExpressions", input, output, nil)
-	return output, nil
+	return &GetUncheckedStyleCardsOutput{Success: true, Cards: results}, nil
 }
 
-func NewGetUncheckedExpressionsTool() (tool.InvokableTool, error) {
+func NewGetUncheckedStyleCardsTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
-		"getUncheckedExpressions",
-		"查看待审核的表达方式。你可以定期检查并审核这些学到的表达习惯是否准确。",
-		getUncheckedExpressionsFunc,
+		"getUncheckedStyleCards",
+		"查看待审核的群聊风格卡片，用于判断哪些说话方式足够稳定、可复用且风险可控。",
+		getUncheckedStyleCardsFunc,
 	)
 }
 
-// ==================== 审核表达方式 ====================
+// ==================== 审核风格卡片 ====================
 
-type ReviewExpressionInput struct {
-	IDs     []uint `json:"ids" jsonschema:"description=表达方式ID列表"`
+type ReviewStyleCardInput struct {
+	IDs     []uint `json:"ids" jsonschema:"description=风格卡片ID列表"`
 	Approve bool   `json:"approve" jsonschema:"description=是否通过审核"`
 }
 
-type ReviewExpressionOutput struct {
+type ReviewStyleCardOutput struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 }
 
-func reviewExpressionFunc(ctx context.Context, input *ReviewExpressionInput) (*ReviewExpressionOutput, error) {
+func reviewStyleCardFunc(ctx context.Context, input *ReviewStyleCardInput) (*ReviewStyleCardOutput, error) {
 	lc := GetLearningContext(ctx)
 	if lc == nil {
-		return &ReviewExpressionOutput{Success: false, Message: "学习上下文未初始化"}, nil
+		return &ReviewStyleCardOutput{Success: false, Message: "学习上下文未初始化"}, nil
 	}
 
 	if len(input.IDs) == 0 {
-		return &ReviewExpressionOutput{Success: false, Message: "表达方式 ID 列表不能为空"}, nil
+		return &ReviewStyleCardOutput{Success: false, Message: "风格卡片 ID 列表不能为空"}, nil
 	}
 
-	err := lc.MemMgr.BatchReviewExpression(input.IDs, input.Approve)
+	err := lc.MemMgr.ReviewStyleCards(input.IDs, input.Approve)
 	if err != nil {
-		output := &ReviewExpressionOutput{Success: false, Message: err.Error()}
-		LogToolCall("reviewExpression", input, output, err)
-		return output, nil
+		return &ReviewStyleCardOutput{Success: false, Message: err.Error()}, nil
 	}
 
-	msg := "已拒绝这些表达方式"
+	msg := "已拒绝这些风格卡片"
 	if input.Approve {
-		msg = "已通过这些表达方式"
+		msg = "已审核这些风格卡片"
 	}
-	output := &ReviewExpressionOutput{Success: true, Message: msg}
-	LogToolCall("reviewExpression", input, output, nil)
-	return output, nil
+	return &ReviewStyleCardOutput{Success: true, Message: msg}, nil
 }
 
-func NewReviewExpressionTool() (tool.InvokableTool, error) {
+func NewReviewStyleCardTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
-		"reviewExpression",
-		"批量审核表达方式。如果你认为这些表达方式记录正确，可以通过；如果有误，可以拒绝。",
-		reviewExpressionFunc,
+		"reviewStyleCard",
+		"批量审核风格卡片。只有足够稳定、可复用且风险可控的卡片才应该通过。",
+		reviewStyleCardFunc,
 	)
 }
 
-// ==================== 保存表达方式工具 ====================
+// ==================== 保存风格卡片工具 ====================
 
-type SaveExpressionInput struct {
-	Situation string `json:"situation" jsonschema:"description=使用场景，例如：打招呼、吐槽、表达惊讶等"`
-	Style     string `json:"style" jsonschema:"description=表达风格或具体的口头禅"`
-	Example   string `json:"example,omitempty" jsonschema:"description=具体的例子"`
+type SaveStyleCardInput struct {
+	Intent        string `json:"intent" jsonschema:"enum=轻松起哄,enum=认同接话,enum=询问推进,enum=安抚缓和,description=风格卡片的意图标签，必须从固定枚举中选择"`
+	Tone          string `json:"tone" jsonschema:"enum=直接,enum=轻松,enum=夸张,enum=克制,description=风格卡片的语气标签，必须从固定枚举中选择"`
+	TriggerRule   string `json:"trigger_rule" jsonschema:"description=什么时候适合参考这种风格"`
+	AvoidRule     string `json:"avoid_rule" jsonschema:"description=什么时候不要参考这种风格"`
+	Example       string `json:"example" jsonschema:"description=一条短例句，只做语气味道参考"`
+	SourceExcerpt string `json:"source_excerpt,omitempty" jsonschema:"description=原始聊天中的短摘录，用于证明该卡片来源真实"`
 }
 
-type SaveExpressionOutput struct {
+type SaveStyleCardOutput struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 }
 
-// saveExpressionFunc 保存表达方式的实际实现
-func saveExpressionFunc(ctx context.Context, input *SaveExpressionInput) (*SaveExpressionOutput, error) {
+func saveStyleCardFunc(ctx context.Context, input *SaveStyleCardInput) (*SaveStyleCardOutput, error) {
 	lc := GetLearningContext(ctx)
 	if lc == nil {
-		return &SaveExpressionOutput{Success: false, Message: "学习上下文未初始化"}, nil
+		return &SaveStyleCardOutput{Success: false, Message: "学习上下文未初始化"}, nil
 	}
 
-	if input.Situation == "" || input.Style == "" {
-		return &SaveExpressionOutput{Success: false, Message: "失败：使用场景和表达风格不能为空"}, nil
+	input.Intent = strings.TrimSpace(input.Intent)
+	input.Tone = strings.TrimSpace(input.Tone)
+	input.TriggerRule = strings.TrimSpace(input.TriggerRule)
+	input.AvoidRule = strings.TrimSpace(input.AvoidRule)
+	input.Example = strings.TrimSpace(input.Example)
+	input.SourceExcerpt = strings.TrimSpace(input.SourceExcerpt)
+
+	if !memory.IsValidStyleIntent(input.Intent) || !memory.IsValidStyleTone(input.Tone) {
+		return &SaveStyleCardOutput{Success: false, Message: "失败：风格标签不合法"}, nil
+	}
+	if input.TriggerRule == "" || input.AvoidRule == "" || input.Example == "" {
+		return &SaveStyleCardOutput{Success: false, Message: "失败：缺少必填字段"}, nil
 	}
 
-	_, err := lc.MemMgr.SaveExpression(&memory.Expression{
-		GroupID:   lc.GroupID,
-		Situation: input.Situation,
-		Style:     input.Style,
-		Examples:  input.Example,
-		Checked:   false,
+	created, err := lc.MemMgr.SaveStyleCardCandidate(ctx, &memory.StyleCard{
+		GroupID:       lc.GroupID,
+		Intent:        input.Intent,
+		Tone:          input.Tone,
+		TriggerRule:   input.TriggerRule,
+		AvoidRule:     input.AvoidRule,
+		Example:       input.Example,
+		SourceExcerpt: input.SourceExcerpt,
+		Status:        memory.StyleCardStatusCandidate,
 	})
 	if err != nil {
-		output := &SaveExpressionOutput{Success: false, Message: err.Error()}
-		LogToolCall("saveExpression", input, output, err)
-		return output, nil
+		return &SaveStyleCardOutput{Success: false, Message: err.Error()}, nil
 	}
 
-	output := &SaveExpressionOutput{Success: true, Message: "已记住这种表达方式"}
-	LogToolCall("saveExpression", input, output, nil)
-	return output, nil
+	msg := "已更新相近的群聊风格卡片"
+	if created {
+		msg = "已记住这张新的群聊风格卡片"
+	}
+	return &SaveStyleCardOutput{Success: true, Message: msg}, nil
 }
 
-func NewSaveExpressionTool() (tool.InvokableTool, error) {
+func NewSaveStyleCardTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
-		"saveExpression",
-		"保存你从群友那学到的表达方式或口头禅。",
-		saveExpressionFunc,
+		"saveStyleCard",
+		"保存你从群聊里提炼出的风格卡片。只记录可复用、低风险、能概括群味的说话方式。",
+		saveStyleCardFunc,
 	)
 }
 
-// ==================== 搜索表达方式工具 ====================
+// ==================== 搜索风格卡片工具 ====================
 
-type SearchExpressionsInput struct {
+type SearchStyleCardsInput struct {
 	Keyword string `json:"keyword" jsonschema:"description=搜索关键词，可以是多个词用空格分隔"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"description=返回数量，默认10"`
 }
 
-type SearchExpressionsOutput struct {
-	Success     bool             `json:"success"`
-	Count       int              `json:"count"`
-	Expressions []map[string]any `json:"expressions,omitempty"`
-	Message     string           `json:"message,omitempty"`
+type SearchStyleCardsOutput struct {
+	Success bool             `json:"success"`
+	Count   int              `json:"count"`
+	Cards   []map[string]any `json:"cards,omitempty"`
+	Message string           `json:"message,omitempty"`
 }
 
-func searchExpressionsFunc(ctx context.Context, input *SearchExpressionsInput) (*SearchExpressionsOutput, error) {
+func searchStyleCardsFunc(ctx context.Context, input *SearchStyleCardsInput) (*SearchStyleCardsOutput, error) {
 	tc := GetToolContext(ctx)
 	if tc == nil {
-		return &SearchExpressionsOutput{Success: false, Message: "工具上下文未初始化"}, nil
+		return &SearchStyleCardsOutput{Success: false, Message: "工具上下文未初始化"}, nil
 	}
 
 	if strings.TrimSpace(input.Keyword) == "" {
-		return &SearchExpressionsOutput{Success: false, Message: "搜索关键词不能为空"}, nil
+		return &SearchStyleCardsOutput{Success: false, Message: "搜索关键词不能为空"}, nil
 	}
 
 	limit := input.Limit
@@ -194,37 +209,36 @@ func searchExpressionsFunc(ctx context.Context, input *SearchExpressionsInput) (
 		limit = 10
 	}
 
-	exps, err := tc.MemoryMgr.SearchExpressions(tc.GroupID, input.Keyword, limit)
+	cards, err := tc.MemoryMgr.SearchStyleCards(tc.GroupID, input.Keyword, limit)
 	if err != nil {
-		output := &SearchExpressionsOutput{Success: false, Message: err.Error()}
-		LogToolCall("searchExpressions", input, output, err)
-		return output, nil
+		return &SearchStyleCardsOutput{Success: false, Message: err.Error()}, nil
 	}
 
-	results := make([]map[string]any, 0, len(exps))
-	for _, j := range exps {
+	results := make([]map[string]any, 0, len(cards))
+	for _, card := range cards {
 		results = append(results, map[string]any{
-			"id":      j.ID,
-			"content": j.Situation,
-			"meaning": j.Style,
-			"context": j.Examples,
-			"checked": j.Checked,
+			"id":                 card.ID,
+			"intent":             card.Intent,
+			"tone":               card.Tone,
+			"trigger_rule":       card.TriggerRule,
+			"avoid_rule":         card.AvoidRule,
+			"example":            card.Example,
+			"evidence_count":     card.EvidenceCount,
+			"from_current_group": card.GroupID == tc.GroupID,
 		})
 	}
 
-	output := &SearchExpressionsOutput{
-		Success:     true,
-		Count:       len(exps),
-		Expressions: results,
-	}
-	LogToolCall("searchExpressions", input, output, nil)
-	return output, nil
+	return &SearchStyleCardsOutput{
+		Success: true,
+		Count:   len(results),
+		Cards:   results,
+	}, nil
 }
 
-func NewSearchExpressionsTool() (tool.InvokableTool, error) {
+func NewSearchStyleCardsTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
-		"searchExpressions",
-		"搜索你学到的表达方式和口头禅。",
-		searchExpressionsFunc,
+		"searchStyleCards",
+		"搜索已经激活的群聊风格卡片（优先返回来源于本群的卡片）。",
+		searchStyleCardsFunc,
 	)
 }

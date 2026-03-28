@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
@@ -41,23 +43,19 @@ func speakFunc(ctx context.Context, input *SpeakInput) (*SpeakOutput, error) {
 	}
 
 	// 通过回调发送消息，获取返回的消息ID
-	msgID, err := tc.SpeakCallback(tc.GroupID, input.Content, input.ReplyTo, input.Mentions)
+	msgID, err := tc.SpeakCallback(ctx, tc.GroupID, input.Content, input.ReplyTo, input.Mentions)
 	if err != nil {
-		output := &SpeakOutput{
+		return &SpeakOutput{
 			Success: false,
 			Message: err.Error(),
-		}
-		LogToolCall("speak", input, output, err)
-		return output, nil
+		}, nil
 	}
 
-	output := &SpeakOutput{
+	return &SpeakOutput{
 		Success:   true,
 		MessageID: msgID,
 		Message:   fmt.Sprintf("发言成功，消息ID: %d", msgID),
-	}
-	LogToolCall("speak", input, output, nil)
-	return output, nil
+	}, nil
 }
 
 // NewSpeakTool 创建发言工具
@@ -93,12 +91,10 @@ type StayQuietOutput struct {
 
 // stayQuietFunc 保持沉默的实际实现
 func stayQuietFunc(ctx context.Context, input *StayQuietInput) (*StayQuietOutput, error) {
-	output := &StayQuietOutput{
+	return &StayQuietOutput{
 		Success: true,
 		Message: "保持沉默",
-	}
-	LogToolCall("stayQuiet", input, output, nil)
-	return output, nil
+	}, nil
 }
 
 // NewStayQuietTool 创建保持沉默工具
@@ -137,15 +133,11 @@ func pokeFunc(ctx context.Context, input *PokeInput) (*PokeOutput, error) {
 		return &PokeOutput{Success: false, Message: "用户 ID 不能为空"}, nil
 	}
 
-	if err := tc.Bot.GroupPoke(tc.GroupID, input.UserID); err != nil {
-		output := &PokeOutput{Success: false, Message: err.Error()}
-		LogToolCall("poke", input, output, err)
-		return output, nil
+	if err := tc.Bot.GroupPoke(ctx, tc.GroupID, input.UserID); err != nil {
+		return &PokeOutput{Success: false, Message: err.Error()}, nil
 	}
 
-	output := &PokeOutput{Success: true, Message: "已戳一戳"}
-	LogToolCall("poke", input, output, nil)
-	return output, nil
+	return &PokeOutput{Success: true, Message: "已戳一戳"}, nil
 }
 
 // NewPokeTool 创建戳一戳工具
@@ -189,15 +181,11 @@ func reactToMessageFunc(ctx context.Context, input *ReactToMessageInput) (*React
 		return &ReactToMessageOutput{Success: false, Message: "表情 ID 不能为空"}, nil
 	}
 
-	if err := tc.Bot.SetMsgEmojiLike(input.MessageID, input.EmojiID); err != nil {
-		output := &ReactToMessageOutput{Success: false, Message: err.Error()}
-		LogToolCall("reactToMessage", input, output, err)
-		return output, nil
+	if err := tc.Bot.SetMsgEmojiLike(ctx, input.MessageID, input.EmojiID); err != nil {
+		return &ReactToMessageOutput{Success: false, Message: err.Error()}, nil
 	}
 
-	output := &ReactToMessageOutput{Success: true, Message: "已回应表情"}
-	LogToolCall("reactToMessage", input, output, nil)
-	return output, nil
+	return &ReactToMessageOutput{Success: true, Message: "已回应表情"}, nil
 }
 
 // NewReactToMessageTool 创建对消息贴表情工具
@@ -237,16 +225,29 @@ func recallMessageFunc(ctx context.Context, input *RecallMessageInput) (*RecallM
 	if input.MessageID == 0 {
 		return &RecallMessageOutput{Success: false, Message: "消息 ID 不能为空"}, nil
 	}
-
-	if err := tc.Bot.DeleteMsg(input.MessageID); err != nil {
-		output := &RecallMessageOutput{Success: false, Message: err.Error()}
-		LogToolCall("recallMessage", input, output, err)
-		return output, nil
+	if tc.MemoryMgr == nil {
+		return &RecallMessageOutput{Success: false, Message: "记忆管理器未初始化"}, nil
 	}
 
-	output := &RecallMessageOutput{Success: true, Message: "已撤回消息"}
-	LogToolCall("recallMessage", input, output, nil)
-	return output, nil
+	log, err := tc.MemoryMgr.GetMessageLogByID(strconv.FormatInt(input.MessageID, 10))
+	if err != nil {
+		return &RecallMessageOutput{Success: false, Message: err.Error()}, nil
+	}
+	if log == nil {
+		return &RecallMessageOutput{Success: false, Message: "未找到该消息记录，无法确认是否还能撤回"}, nil
+	}
+	if selfID := tc.Bot.GetSelfID(); selfID > 0 && log.UserID != 0 && log.UserID != selfID {
+		return &RecallMessageOutput{Success: false, Message: "只能撤回你自己发的消息"}, nil
+	}
+	if time.Since(log.CreatedAt) > 2*time.Minute {
+		return &RecallMessageOutput{Success: false, Message: "消息已超过两分钟，无法撤回"}, nil
+	}
+
+	if err := tc.Bot.DeleteMsg(ctx, input.MessageID); err != nil {
+		return &RecallMessageOutput{Success: false, Message: err.Error()}, nil
+	}
+
+	return &RecallMessageOutput{Success: true, Message: "已撤回消息"}, nil
 }
 
 // NewRecallMessageTool 创建撤回消息工具

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"mumu-bot/internal/config"
-
 	"sync"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
@@ -12,7 +11,7 @@ import (
 )
 
 var (
-	defaultClient     *Client
+	defaultClient     model.ToolCallingChatModel
 	defaultClientErr  error
 	defaultClientOnce sync.Once
 
@@ -21,13 +20,8 @@ var (
 	auxClientOnce sync.Once
 )
 
-// Client LLM 客户端
-type Client struct {
-	chatModel model.ToolCallingChatModel
-}
-
 // NewClient 创建 LLM 客户端（单例）
-func NewClient() (*Client, error) {
+func NewClient() (model.ToolCallingChatModel, error) {
 	defaultClientOnce.Do(func() {
 		cfg := config.Get()
 		ctx := context.Background()
@@ -44,9 +38,7 @@ func NewClient() (*Client, error) {
 			return
 		}
 
-		defaultClient = &Client{
-			chatModel: chatModel,
-		}
+		defaultClient = chatModel
 	})
 
 	return defaultClient, defaultClientErr
@@ -73,9 +65,4 @@ func NewAuxClient() (model.ToolCallingChatModel, error) {
 	})
 
 	return auxClient, auxClientErr
-}
-
-// GetModel 获取底层模型（支持工具调用）
-func (c *Client) GetModel() model.ToolCallingChatModel {
-	return c.chatModel
 }
