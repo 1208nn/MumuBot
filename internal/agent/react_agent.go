@@ -469,22 +469,24 @@ func (a *Agent) parseMessageContent(msg *onebot.GroupMessage) string {
 	for _, img := range msg.Images {
 		if img.SubType == 1 {
 			// 表情包类型
-			var desc string
+			var visionDesc string
 			if a.vision != nil && img.URL != "" {
 				if d, err := a.vision.DescribeImage(ctx, img.URL); err == nil {
-					desc = d
+					visionDesc = d
 				}
 			}
-			if desc == "" && img.Summary != "" {
-				desc = img.Summary
+			saveDesc := strings.TrimSpace(visionDesc)
+			desc := saveDesc
+			if desc == "" {
+				desc = strings.TrimSpace(img.Summary)
 			}
 			// 自动保存表情包
-			if img.URL != "" && config.Get().Sticker.AutoSave && a.ctx.Err() == nil {
+			if img.URL != "" && saveDesc != "" && config.Get().Sticker.AutoSave && a.ctx.Err() == nil {
 				a.wg.Add(1)
 				go func(url string, stickerDesc string) {
 					defer a.wg.Done()
 					a.autoSaveSticker(a.ctx, url, stickerDesc)
-				}(img.URL, desc)
+				}(img.URL, saveDesc)
 			}
 			if desc != "" {
 				content += fmt.Sprintf(" [表情包:%s]", desc)
@@ -1297,6 +1299,11 @@ func (a *Agent) autoSaveSticker(ctx context.Context, url string, description str
 	if err := ctx.Err(); err != nil {
 		return
 	}
+	description = strings.TrimSpace(description)
+	if description == "" {
+		zap.L().Debug("跳过自动保存表情包：图片识别失败", zap.String("url", url))
+		return
+	}
 
 	// 获取配置
 	cfg := config.Get()
@@ -1318,11 +1325,6 @@ func (a *Agent) autoSaveSticker(ctx context.Context, url string, description str
 	if err := ctx.Err(); err != nil {
 		_ = os.Remove(result.FilePath)
 		return
-	}
-
-	// 如果没有描述，使用默认描述
-	if description == "" {
-		description = "未描述的表情包"
 	}
 
 	// 保存到数据库
