@@ -372,6 +372,24 @@ func (a *Agent) Stop() {
 	zap.L().Info("Agent 已停止")
 }
 
+func (a *Agent) OneBotConnected() bool {
+	return a != nil && a.bot != nil && a.bot.IsConnected()
+}
+
+func (a *Agent) BotSelfID() int64 {
+	if a == nil || a.bot == nil {
+		return 0
+	}
+	return a.bot.GetSelfID()
+}
+
+func (a *Agent) MCPToolCount() int {
+	if a == nil || a.mcpMgr == nil {
+		return 0
+	}
+	return len(a.mcpMgr.GetTools())
+}
+
 func (a *Agent) onMessage(msg *onebot.GroupMessage) {
 	if err := a.ctx.Err(); err != nil {
 		return

@@ -1018,6 +1018,13 @@ func (c *Client) GetSelfID() int64 {
 	return c.selfID
 }
 
+// IsConnected 返回当前 OneBot WebSocket 是否已连接。
+func (c *Client) IsConnected() bool {
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
+	return c.conn != nil && !c.reconnecting
+}
+
 // Close 关闭连接
 func (c *Client) Close() error {
 	var closeErr error

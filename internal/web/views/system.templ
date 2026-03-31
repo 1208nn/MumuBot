@@ -1,0 +1,36 @@
+package views
+
+templ SystemPage(data SystemPageData, currentPath string) {
+	@Layout(LayoutData{
+		Title:       "系统",
+		CurrentPath: currentPath,
+		NavItems:    NavItems(),
+		Flash:       data.Flash,
+	}, SystemBody(data))
+}
+
+templ SystemBody(data SystemPageData) {
+	<div class="space-y-6">
+		@PageHeader("系统状态", "查看资料、连接情况和当前可用能力。", "系统总览")
+		<div class="grid gap-4 xl:grid-cols-2">
+			for _, section := range data.Sections {
+				<div class="rounded-[1.8rem] border border-white/70 bg-white/82 p-5 shadow-[0_26px_70px_rgba(14,31,53,0.08)] backdrop-blur-xl motion-safe:animate-[admin-fade-up_220ms_ease-out] sm:p-6">
+					<div class="flex items-center gap-3 text-lg font-extrabold tracking-[-0.03em] text-slate-950 sm:text-[1.2rem]">
+						<span class="inline-flex size-9 items-center justify-center rounded-2xl bg-slate-50 text-slate-500 ring-1 ring-slate-200/80">
+							@AdminIcon(systemSectionIconName(section.Title), "size-5", "system-section")
+						</span>
+						<span>{ section.Title }</span>
+					</div>
+					<div class="mt-5 grid gap-3 sm:grid-cols-2">
+						for _, field := range section.Fields {
+							<div class={ systemFieldCardClass(field) }>
+								<strong class="text-xs font-extrabold uppercase tracking-[0.1em] text-slate-500">{ field.Label }</strong>
+								<div class={ systemFieldValueClass(field) }>{ field.Value }</div>
+							</div>
+						}
+					</div>
+				</div>
+			}
+		</div>
+	</div>
+}

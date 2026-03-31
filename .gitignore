@@ -9,6 +9,7 @@ amu.exe
 
 # 测试
 *.test
+*_templ.go
 
 # 输出
 *.out
@@ -51,3 +52,8 @@ napcat_onebot_11_http_api.json
 onebot-11-master/
 
 mcp.json
+/.codex-temp
+/node_modules
+/internal/web/assets/dist/
+/.superpowers
+/docs

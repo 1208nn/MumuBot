@@ -1,0 +1,317 @@
+package views
+
+import "fmt"
+
+templ StickerListPage(data StickerListPageData, currentPath string) {
+	@LayoutWithOverlay(LayoutData{
+		Title:       "表情包",
+		CurrentPath: currentPath,
+		NavItems:    NavItems(),
+		Flash:       data.Flash,
+	}, StickerListBody(data), StickerListOverlays(data))
+}
+
+templ StickerListBody(data StickerListPageData) {
+	<div class="space-y-6">
+		@PageHeader("表情包", "查看预览、文件信息和使用次数。", "表情图库")
+		<div class="space-y-4 rounded-[1.7rem] border border-white/70 bg-white/82 p-4 shadow-[0_22px_60px_rgba(14,31,53,0.08)] backdrop-blur-xl motion-safe:animate-[admin-fade-up_220ms_ease-out] sm:p-5">
+			@FilterAccordion("sticker-filters", "筛选条件", "按描述、文件名或哈希查找表情包。", EmptyComponent(), false, StickerFilterForm(data))
+			@SortToolbar(data.Sort)
+			<div class="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+				if len(data.Items) == 0 {
+					<div class="rounded-[1.75rem] border border-dashed border-slate-300/80 bg-white/55 p-6 text-center text-sm font-medium text-slate-500 md:col-span-2 2xl:col-span-3">暂无表情包</div>
+				}
+				for _, item := range data.Items {
+					<div class="rounded-[1.55rem] border border-slate-200/70 bg-white/76 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)] motion-safe:animate-[admin-fade-up_220ms_ease-out]">
+						if stickerFileURL(item.FileName) != "" {
+							<button class="flex h-40 w-full items-center justify-center overflow-hidden rounded-[1.5rem] bg-[radial-gradient(circle_at_top,rgba(96,165,250,0.24),transparent_55%),linear-gradient(135deg,rgba(16,26,50,0.98),rgba(14,116,144,0.9))] p-3" type="button" data-hs-overlay={ fmt.Sprintf("#sticker-preview-%d", item.ID) }>
+								<img class="block h-full w-full object-contain" src={ stickerFileURL(item.FileName) } alt={ stickerDescriptionText(item.Description) } loading="lazy" onerror="this.hidden=true;this.nextElementSibling.hidden=false;"/>
+								<span class="hidden text-4xl font-extrabold uppercase tracking-[-0.08em] text-white">{ stickerPreviewText(item.Description) }</span>
+							</button>
+						} else {
+							<div class="flex h-40 items-center justify-center overflow-hidden rounded-[1.5rem] bg-[radial-gradient(circle_at_top,rgba(96,165,250,0.24),transparent_55%),linear-gradient(135deg,rgba(16,26,50,0.98),rgba(14,116,144,0.9))] p-3">
+								<div class="flex flex-col items-center gap-3 text-center text-white/92">
+									<div class="flex size-14 items-center justify-center rounded-2xl bg-white/12 ring-1 ring-white/15">
+										<svg class="size-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+											<rect x="3.5" y="5" width="17" height="14" rx="2.5"></rect>
+											<circle cx="9" cy="10" r="1.5"></circle>
+											<path d="m7 16 3.5-3.5 2.5 2.5 3-3 1.5 1.5"></path>
+										</svg>
+									</div>
+									<div class="space-y-1">
+										<div class="text-sm font-extrabold uppercase tracking-[0.18em] text-cyan-50">暂无预览</div>
+										<div class="text-xs leading-5 text-cyan-100/80">文件暂时无法访问</div>
+									</div>
+								</div>
+							</div>
+						}
+						<div class="mt-4 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">描述</div>
+						<div class="mt-2 line-clamp-2 text-[1.02rem] font-bold tracking-[-0.03em] text-slate-950">{ stickerDescriptionText(item.Description) }</div>
+						<div class="mt-1 line-clamp-2 text-sm text-slate-500">{ item.FileName }</div>
+						<div class="mt-4 space-y-2 text-sm text-slate-600">
+							<div class="flex items-center justify-between gap-4"><span>使用次数</span><strong class="font-semibold text-slate-900">{ fmt.Sprintf("%d", item.UseCount) }</strong></div>
+							<div class="flex items-center justify-between gap-4"><span>哈希</span><code class="rounded-full bg-slate-950/5 px-2.5 py-1 text-xs">{ item.FileHash }</code></div>
+							<div class="flex items-center justify-between gap-4"><span>创建时间</span><span>{ formatTime(item.CreatedAt) }</span></div>
+						</div>
+						<div class="mt-5 grid gap-3">
+							if stickerFileURL(item.FileName) != "" {
+								<button class="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-teal-50 px-4 py-3 text-sm font-semibold text-teal-700 ring-1 ring-teal-200/80 transition duration-200 ease-out hover:bg-teal-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-wait disabled:opacity-70" type="button" data-hs-overlay={ fmt.Sprintf("#sticker-preview-%d", item.ID) }>查看大图</button>
+							}
+							<button
+								class="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 ring-1 ring-rose-200/80 transition duration-200 ease-out hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-wait disabled:opacity-70"
+								type="button"
+								data-hs-overlay="#admin-action-dialog"
+								data-admin-action={ adminActionJSON(AdminActionPayload{
+									Title:       "删除表情包",
+									Body:        "删除后会一并移除这张图片，请确认它已经不再需要。",
+									Endpoint:    fmt.Sprintf("/admin/actions/stickers/%d/delete", item.ID),
+									SubmitLabel: "确认删除",
+									SubmitClass: modalActionClass(RowAction{Kind: "danger"}),
+									BusyLabel:   "删除中",
+									Fields: []AdminActionField{
+										{Label: "待删除内容", Value: stickerDescriptionText(item.Description)},
+									},
+								}) }>删除</button>
+						</div>
+					</div>
+				}
+			</div>
+			@ListFooter(data.Meta)
+		</div>
+	</div>
+}
+
+templ StickerListOverlays(data StickerListPageData) {
+	for _, item := range data.Items {
+		if stickerFileURL(item.FileName) != "" {
+			@StickerPreviewOverlay(item.ID, stickerFileURL(item.FileName), item.Description, item.FileName, item.FileHash, item.UseCount, formatTime(item.CreatedAt))
+		}
+	}
+}
+
+templ StickerFilterForm(data StickerListPageData) {
+	<form class="grid gap-2.5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center" method="get" action="/admin/stickers" hx-get="/admin/stickers" hx-target="#admin-page-body" hx-swap="outerHTML" hx-push-url="true">
+		<input type="hidden" name="sort" value={ data.Sort.CurrentSort }/>
+		<input type="hidden" name="order" value={ data.Sort.CurrentOrder }/>
+		<input class="block w-full min-w-0 rounded-2xl border-slate-200/80 bg-white/90 px-4 py-2.5 text-sm text-slate-800 shadow-none placeholder:text-slate-400 focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100" type="text" name="keyword" value={ data.Keyword } placeholder="搜索描述、文件名或哈希"/>
+		<button class="inline-flex items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#101a32_0%,#1e2c4f_58%,#0b7285_120%)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_18px_32px_rgba(15,23,42,0.16)] transition duration-200 ease-out hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-wait disabled:opacity-70 xl:min-w-28" type="submit" data-loading-label="筛选中">筛选</button>
+	</form>
+}
+
+templ StickerPreviewOverlay(id uint, fileURL string, description string, fileName string, fileHash string, useCount int, createdAt string) {
+	@OverlayDialog(fmt.Sprintf("sticker-preview-%d", id), "表情包预览", "查看图片、文件名和哈希信息。", true, StickerPreviewOverlayBody(id, fileURL, description, fileName, fileHash, useCount, createdAt))
+}
+
+templ StickerPreviewOverlayBody(id uint, fileURL string, description string, fileName string, fileHash string, useCount int, createdAt string) {
+	<div class="flex min-h-80 items-center justify-center rounded-[1.75rem] bg-[radial-gradient(circle_at_top,rgba(96,165,250,0.24),transparent_55%),linear-gradient(135deg,rgba(16,26,50,0.98),rgba(14,116,144,0.9))] p-5">
+		<img class="block max-h-[32rem] max-w-full object-contain" src={ fileURL } alt={ stickerDescriptionText(description) } loading="lazy"/>
+	</div>
+	<div class="mt-5 grid gap-3 sm:grid-cols-2">
+		<div class="rounded-[1.25rem] bg-slate-50/90 p-4 ring-1 ring-slate-200/80">
+			<strong class="text-xs font-extrabold uppercase tracking-[0.1em] text-slate-500">描述</strong>
+			<div class="mt-2 text-sm leading-7 text-slate-700">{ stickerDescriptionText(description) }</div>
+		</div>
+		<div class="rounded-[1.25rem] bg-slate-50/90 p-4 ring-1 ring-slate-200/80">
+			<strong class="text-xs font-extrabold uppercase tracking-[0.1em] text-slate-500">文件名</strong>
+			<div class="mt-2 break-all text-sm leading-7 text-slate-700">{ fileName }</div>
+		</div>
+		<div class="rounded-[1.25rem] bg-slate-50/90 p-4 ring-1 ring-slate-200/80">
+			<strong class="text-xs font-extrabold uppercase tracking-[0.1em] text-slate-500">哈希</strong>
+			<div class="mt-2 break-all text-sm leading-7 text-slate-700">{ fileHash }</div>
+		</div>
+		<div class="rounded-[1.25rem] bg-slate-50/90 p-4 ring-1 ring-slate-200/80">
+			<strong class="text-xs font-extrabold uppercase tracking-[0.1em] text-slate-500">统计</strong>
+			<div class="mt-2 text-sm leading-7 text-slate-700">使用 { fmt.Sprintf("%d", useCount) } 次 · 创建于 { createdAt }</div>
+		</div>
+	</div>
+	<div class="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+		<a class="inline-flex items-center justify-center gap-2 rounded-2xl bg-teal-50 px-4 py-3 text-sm font-semibold text-teal-700 ring-1 ring-teal-200/80 transition duration-200 ease-out hover:bg-teal-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white" href={ fileURL } target="_blank" rel="noreferrer">新窗口打开</a>
+		<button type="button" class="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200/80 bg-white/82 px-4 py-3 text-sm font-semibold text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] transition duration-200 ease-out hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-wait disabled:opacity-70" data-hs-overlay={ fmt.Sprintf("#sticker-preview-%d", id) }>关闭</button>
+	</div>
+}
+
+templ MemoryListPage(data MemoryListPageData, currentPath string) {
+	@Layout(LayoutData{
+		Title:       "记忆",
+		CurrentPath: currentPath,
+		NavItems:    NavItems(),
+		Flash:       data.Flash,
+	}, MemoryListBody(data))
+}
+
+templ MemoryListBody(data MemoryListPageData) {
+	<div class="space-y-6">
+		@PageHeader("记忆", "按群号、类型和关键词筛选记忆。", "记忆检索")
+		<div class="space-y-4 rounded-[1.7rem] border border-white/70 bg-white/82 p-4 shadow-[0_22px_60px_rgba(14,31,53,0.08)] backdrop-blur-xl motion-safe:animate-[admin-fade-up_220ms_ease-out] sm:p-5">
+			@FilterAccordion("memory-filters", "筛选条件", "按群号或关键词查找记忆，再按类型快速收窄结果。", ChoiceFilterGroup("type", data.Type, []FilterChoice{
+				{Label: "全部类型", Value: ""},
+				{Label: "群长期事实", Value: "group_fact"},
+				{Label: "自身经历", Value: "self_experience"},
+				{Label: "重要对话", Value: "conversation"},
+			}), true, MemoryFilterForm(data))
+			@SortToolbar(data.Sort)
+			if len(data.Items) == 0 {
+				<div class="rounded-[1.75rem] border border-dashed border-slate-300/80 bg-white/55 p-6 text-center text-sm font-medium text-slate-500">暂无记忆</div>
+			} else {
+				<div class="grid gap-4 xl:grid-cols-2">
+				for _, item := range data.Items {
+					<article class="rounded-[1.45rem] border border-slate-200/70 bg-white/76 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)] motion-safe:animate-[admin-fade-up_220ms_ease-out]">
+							<div class="flex items-start justify-between gap-4">
+								<div class="min-w-0">
+									<span class="inline-flex items-center rounded-full bg-slate-950/5 px-3 py-1 text-xs font-semibold text-slate-700">{ memoryTypeText(item.Type) }</span>
+									<div class="mt-4 text-[1.02rem] font-bold leading-8 tracking-[-0.03em] text-slate-950">{ item.Content }</div>
+									<div class="mt-3 text-sm leading-6 text-slate-500">群 { fmt.Sprintf("%d", item.GroupID) } · 用户 { fmt.Sprintf("%d", item.UserID) }</div>
+								</div>
+								<button
+									class="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 ring-1 ring-rose-200/80 transition duration-200 ease-out hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-wait disabled:opacity-70"
+									type="button"
+									data-hs-overlay="#admin-action-dialog"
+									data-admin-action={ adminActionJSON(AdminActionPayload{
+									Title:       "删除记忆",
+									Body:        "删除后将无法再查看这条记忆。",
+										Endpoint:    fmt.Sprintf("/admin/actions/memories/%d/delete", item.ID),
+										SubmitLabel: "确认删除",
+										SubmitClass: modalActionClass(RowAction{Kind: "danger"}),
+										BusyLabel:   "删除中",
+										Fields: []AdminActionField{
+											{Label: "记忆内容", Value: previewText(item.Content, 120)},
+										},
+									}) }>删除</button>
+							</div>
+							<div class="mt-5 grid gap-3 sm:grid-cols-3">
+								<div class="rounded-[1.1rem] bg-slate-50/90 px-3 py-3 ring-1 ring-slate-200/80">
+									<div class="text-[11px] font-extrabold uppercase tracking-[0.12em] text-slate-500">重要度</div>
+									<div class="mt-1 text-sm font-semibold text-slate-900">{ fmt.Sprintf("%.2f", item.Importance) }</div>
+								</div>
+								<div class="rounded-[1.1rem] bg-slate-50/90 px-3 py-3 ring-1 ring-slate-200/80">
+									<div class="text-[11px] font-extrabold uppercase tracking-[0.12em] text-slate-500">访问次数</div>
+									<div class="mt-1 text-sm font-semibold text-slate-900">{ fmt.Sprintf("%d", item.AccessCount) } 次</div>
+								</div>
+								<div class="rounded-[1.1rem] bg-slate-50/90 px-3 py-3 ring-1 ring-slate-200/80">
+									<div class="text-[11px] font-extrabold uppercase tracking-[0.12em] text-slate-500">内容长度</div>
+									<div class="mt-1 text-sm font-semibold text-slate-900">{ fmt.Sprintf("%d", len([]rune(item.Content))) } 字</div>
+								</div>
+							</div>
+						</article>
+					}
+				</div>
+			}
+			@ListFooter(data.Meta)
+		</div>
+	</div>
+}
+
+templ MemoryFilterForm(data MemoryListPageData) {
+	<form class="grid gap-2.5 xl:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] xl:items-center" method="get" action="/admin/memories" hx-get="/admin/memories" hx-target="#admin-page-body" hx-swap="outerHTML" hx-push-url="true">
+		<input type="hidden" name="sort" value={ data.Sort.CurrentSort }/>
+		<input type="hidden" name="order" value={ data.Sort.CurrentOrder }/>
+		<input class="block w-full min-w-0 rounded-2xl border-slate-200/80 bg-white/90 px-4 py-2.5 text-sm text-slate-800 shadow-none placeholder:text-slate-400 focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100" type="text" name="group_id" value={ data.GroupID } placeholder="群号"/>
+		<input class="block w-full min-w-0 rounded-2xl border-slate-200/80 bg-white/90 px-4 py-2.5 text-sm text-slate-800 shadow-none placeholder:text-slate-400 focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100" type="text" name="keyword" value={ data.Keyword } placeholder="关键词"/>
+		<button class="inline-flex items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#101a32_0%,#1e2c4f_58%,#0b7285_120%)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_18px_32px_rgba(15,23,42,0.16)] transition duration-200 ease-out hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-wait disabled:opacity-70 xl:min-w-28" type="submit" data-loading-label="筛选中">筛选</button>
+	</form>
+}
+
+templ MemberListPage(data MemberListPageData, currentPath string) {
+	@Layout(LayoutData{
+		Title:       "成员",
+		CurrentPath: currentPath,
+		NavItems:    NavItems(),
+		Flash:       data.Flash,
+	}, MemberListBody(data))
+}
+
+templ MemberListBody(data MemberListPageData) {
+	<div class="space-y-6">
+		@PageHeader("成员画像", "查看昵称、兴趣、常用词和活跃信息。", "成员画像")
+		<div class="space-y-4 rounded-[1.7rem] border border-white/70 bg-white/82 p-4 shadow-[0_22px_60px_rgba(14,31,53,0.08)] backdrop-blur-xl motion-safe:animate-[admin-fade-up_220ms_ease-out] sm:p-5">
+			@FilterAccordion("member-filters", "筛选条件", "按昵称、QQ、兴趣或常用词查找成员画像。", EmptyComponent(), false, MemberFilterForm(data))
+			@SortToolbar(data.Sort)
+			<div class="space-y-4">
+				if len(data.Items) == 0 {
+					<div class="rounded-[1.75rem] border border-dashed border-slate-300/80 bg-white/55 p-6 text-center text-sm font-medium text-slate-500">暂无成员画像</div>
+				}
+				for _, item := range data.Items {
+					<article class="grid gap-4 rounded-[1.45rem] border border-slate-200/70 bg-white/76 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.82)] motion-safe:animate-[admin-fade-up_220ms_ease-out] xl:grid-cols-[13rem_minmax(0,1fr)_10rem] xl:items-start">
+						<section class="min-w-0 space-y-4">
+							<div class="flex items-center gap-4">
+								<div class="flex size-12 shrink-0 items-center justify-center rounded-[1.15rem] bg-[linear-gradient(135deg,#101a32_0%,#1e2c4f_58%,#0b7285_120%)] text-lg font-extrabold text-white shadow-[0_16px_32px_rgba(15,23,42,0.16)]">{ avatarText(item.Nickname) }</div>
+								<div class="min-w-0">
+									<div class="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">成员</div>
+									<div class="mt-1 text-lg font-extrabold tracking-[-0.04em] text-slate-950">{ memberDisplayName(item.Nickname) }</div>
+									<div class="mt-1 text-sm text-slate-500">QQ { fmt.Sprintf("%d", item.UserID) }</div>
+								</div>
+							</div>
+							<div class="rounded-[1.15rem] bg-slate-50/90 p-4 ring-1 ring-slate-200/80">
+								<div class="text-xs font-extrabold uppercase tracking-[0.1em] text-slate-500">说话风格</div>
+								<div class="mt-2 text-sm leading-6 text-slate-700">{ memberFieldText(item.SpeakStyle, "暂无画像") }</div>
+							</div>
+						</section>
+						<section class="min-w-0 items-start grid gap-4 lg:grid-cols-2">
+							<div class="self-start rounded-[1.15rem] bg-slate-50/90 p-4 ring-1 ring-slate-200/80">
+								<div class="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">兴趣</div>
+								if len(memberTags(item.Interests, 6)) > 0 {
+									<div class="mt-3 flex flex-wrap gap-2">
+										for _, tag := range memberTags(item.Interests, 6) {
+											<span class="inline-flex max-w-full items-center rounded-full bg-teal-50 px-3 py-1 text-[11px] font-semibold text-teal-700 ring-1 ring-teal-200/80">{ tag }</span>
+										}
+										if memberTagOverflow(item.Interests, 6) > 0 {
+											<span class="inline-flex max-w-full items-center rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-500">+{ fmt.Sprintf("%d", memberTagOverflow(item.Interests, 6)) }</span>
+										}
+									</div>
+								} else {
+									<div class="mt-3 text-sm text-slate-500">暂无兴趣标签</div>
+								}
+							</div>
+							<div class="self-start rounded-[1.15rem] bg-slate-50/90 p-4 ring-1 ring-slate-200/80">
+								<div class="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">常用词</div>
+								if len(memberTags(item.CommonWords, 6)) > 0 {
+									<div class="mt-3 flex flex-wrap gap-2">
+										for _, tag := range memberTags(item.CommonWords, 6) {
+											<span class="inline-flex max-w-full items-center rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200/80">{ tag }</span>
+										}
+										if memberTagOverflow(item.CommonWords, 6) > 0 {
+											<span class="inline-flex max-w-full items-center rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-500">+{ fmt.Sprintf("%d", memberTagOverflow(item.CommonWords, 6)) }</span>
+										}
+									</div>
+								} else {
+									<div class="mt-3 text-sm text-slate-500">暂无常用词</div>
+								}
+							</div>
+						</section>
+						<section class="min-w-0 border-t border-dashed border-slate-200 pt-5 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
+							<div class="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">活跃信息</div>
+							<div class="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+								<div class="rounded-[1.05rem] bg-slate-50/90 p-3.5 ring-1 ring-slate-200/80">
+									<div class="text-[11px] font-extrabold uppercase tracking-[0.12em] text-slate-500">发言数</div>
+									<div class="mt-2 text-sm font-semibold text-slate-900">{ fmt.Sprintf("%d", item.MsgCount) }</div>
+								</div>
+								<div class="rounded-[1.05rem] bg-slate-50/90 p-3.5 ring-1 ring-slate-200/80">
+									<div class="text-[11px] font-extrabold uppercase tracking-[0.12em] text-slate-500">活跃度</div>
+									<div class="mt-2 text-sm font-semibold text-slate-900">{ fmt.Sprintf("%.2f", item.Activity) }</div>
+								</div>
+								<div class="rounded-[1.05rem] bg-slate-50/90 p-3.5 ring-1 ring-slate-200/80">
+									<div class="text-[11px] font-extrabold uppercase tracking-[0.12em] text-slate-500">亲密度</div>
+									<div class="mt-2 text-sm font-semibold text-slate-900">{ fmt.Sprintf("%.2f", item.Intimacy) }</div>
+								</div>
+								<div class="rounded-[1.05rem] bg-slate-50/90 p-3.5 ring-1 ring-slate-200/80">
+									<div class="text-[11px] font-extrabold uppercase tracking-[0.12em] text-slate-500">最后发言</div>
+									<div class="mt-2 text-sm font-semibold text-slate-900">{ formatTime(item.LastSpeak) }</div>
+								</div>
+							</div>
+						</section>
+					</article>
+				}
+			</div>
+			@ListFooter(data.Meta)
+		</div>
+	</div>
+}
+
+templ MemberFilterForm(data MemberListPageData) {
+	<form class="grid gap-2.5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center" method="get" action="/admin/members" hx-get="/admin/members" hx-target="#admin-page-body" hx-swap="outerHTML" hx-push-url="true">
+		<input type="hidden" name="sort" value={ data.Sort.CurrentSort }/>
+		<input type="hidden" name="order" value={ data.Sort.CurrentOrder }/>
+		<input class="block w-full min-w-0 rounded-2xl border-slate-200/80 bg-white/90 px-4 py-2.5 text-sm text-slate-800 shadow-none placeholder:text-slate-400 focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100" type="text" name="keyword" value={ data.Keyword } placeholder="昵称、QQ、兴趣、常用词"/>
+		<button class="inline-flex items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#101a32_0%,#1e2c4f_58%,#0b7285_120%)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_18px_32px_rgba(15,23,42,0.16)] transition duration-200 ease-out hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-wait disabled:opacity-70 xl:min-w-28" type="submit" data-loading-label="筛选中">筛选</button>
+	</form>
+}

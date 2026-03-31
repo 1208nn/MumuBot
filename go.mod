@@ -4,7 +4,6 @@ go 1.25.0
 
 require (
 	github.com/cloudwego/eino v0.8.5
-	github.com/gin-gonic/gin v1.12.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/milvus-io/milvus/client/v2 v2.6.3
 	gopkg.in/yaml.v3 v3.0.1
@@ -39,18 +38,11 @@ require (
 	github.com/eino-contrib/jsonschema v1.0.3 // indirect
 	github.com/evanphx/json-patch v5.9.11+incompatible // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
-	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
 	github.com/getsentry/sentry-go v0.44.1 // indirect
-	github.com/gin-contrib/sse v1.1.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
-	github.com/go-playground/locales v0.14.1 // indirect
-	github.com/go-playground/universal-translator v0.18.1 // indirect
-	github.com/go-playground/validator/v10 v10.30.1 // indirect
 	github.com/go-sql-driver/mysql v1.9.3 // indirect
-	github.com/goccy/go-json v0.10.6 // indirect
-	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
@@ -71,10 +63,8 @@ require (
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20260324052639-156f7da3f749 // indirect
 	github.com/mailru/easyjson v0.9.2 // indirect
-	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/meguminnnnnnnnn/go-openai v0.1.1 // indirect
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.13 // indirect
 	github.com/milvus-io/milvus/pkg/v2 v2.6.13 // indirect
@@ -93,8 +83,6 @@ require (
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect
-	github.com/quic-go/qpack v0.6.0 // indirect
-	github.com/quic-go/quic-go v0.59.0 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/samber/lo v1.53.0 // indirect
 	github.com/shirou/gopsutil/v3 v3.24.5 // indirect
@@ -115,7 +103,6 @@ require (
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/twpayne/go-geom v1.6.1 // indirect
 	github.com/uber/jaeger-client-go v2.30.0+incompatible // indirect
-	github.com/ugorji/go/codec v1.3.1 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xiang90/probing v0.0.0-20221125231312-a49e3df8f510 // indirect
@@ -129,7 +116,6 @@ require (
 	go.etcd.io/etcd/pkg/v3 v3.6.9 // indirect
 	go.etcd.io/etcd/server/v3 v3.6.9 // indirect
 	go.etcd.io/raft/v3 v3.6.0 // indirect
-	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.67.0 // indirect
 	go.opentelemetry.io/otel v1.42.0 // indirect
@@ -141,6 +127,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/automaxprocs v1.6.0 // indirect
+	go.uber.org/mock v0.6.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	golang.org/x/arch v0.25.0 // indirect
@@ -165,11 +152,13 @@ require (
 
 require (
 	github.com/6tail/lunar-go v1.4.6
+	github.com/a-h/templ v0.3.1001
 	github.com/bytedance/sonic v1.15.0
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260323112355-f061db7e8419
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.10
 	github.com/cloudwego/eino-ext/components/tool/httprequest v0.0.0-20260323112355-f061db7e8419
 	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8
+	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/petar-dambovaliev/aho-corasick v0.0.0-20250424160509-463d218d4745

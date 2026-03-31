@@ -28,6 +28,7 @@ type Config struct {
 	Memory         MemoryConfig    `yaml:"memory"`
 	Sticker        StickerConfig   `yaml:"sticker"` // 表情包配置
 	Server         ServerConfig    `yaml:"server"`
+	Web            WebConfig       `yaml:"web"`
 	Debug          DebugConfig     `yaml:"debug"` // 调试配置
 }
 
@@ -179,8 +180,12 @@ type StickerConfig struct {
 
 // ServerConfig HTTP服务配置
 type ServerConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
+	Port int `yaml:"port"`
+}
+
+// WebConfig 管理后台配置
+type WebConfig struct {
+	AdminKey string `yaml:"admin_key"`
 }
 
 // DebugConfig 调试配置

@@ -1,0 +1,125 @@
+@import "tailwindcss";
+@import "preline/variants.css";
+
+@plugin "@tailwindcss/forms";
+
+@source "../../views";
+@source "../../../../node_modules/preline/dist/*.js";
+
+@theme {
+  --font-sans: "Fira Sans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
+  --font-mono: "Fira Code", "JetBrains Mono", "Consolas", monospace;
+  --color-admin-ink-950: #08111f;
+  --color-admin-ink-900: #122033;
+  --color-admin-ink-700: #526274;
+  --color-admin-ink-500: #74859b;
+  --color-admin-teal-600: #0f766e;
+  --color-admin-teal-500: #14b8a6;
+  --color-admin-cyan-500: #06b6d4;
+  --color-admin-blue-500: #3b82f6;
+  --color-admin-blue-800: #1e3a8a;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    min-height: 100vh;
+    background: linear-gradient(140deg, #edf6fb 0%, #f8fbff 46%, #edf8f2 100%);
+    background-attachment: fixed;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: -18%;
+    z-index: -2;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 14% 18%, rgba(56, 189, 248, 0.28), transparent 30%),
+      radial-gradient(circle at 82% 14%, rgba(15, 118, 110, 0.22), transparent 28%),
+      radial-gradient(circle at 58% 78%, rgba(59, 130, 246, 0.16), transparent 26%),
+      radial-gradient(circle at 28% 86%, rgba(16, 185, 129, 0.12), transparent 22%);
+    filter: blur(22px);
+    animation: admin-aurora 22s ease-in-out infinite alternate;
+  }
+
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      linear-gradient(rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0)),
+      repeating-linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0) 0,
+        rgba(255, 255, 255, 0) 79px,
+        rgba(148, 163, 184, 0.035) 80px
+      );
+    mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.6), transparent 72%);
+  }
+
+  code {
+    font-family: var(--font-mono);
+  }
+}
+
+@layer components {
+  [x-cloak] {
+    display: none !important;
+  }
+
+  .admin-example-spotlight {
+    background:
+      radial-gradient(circle at 18% 18%, rgba(125, 211, 252, 0.18), transparent 18%),
+      radial-gradient(circle at 78% 78%, rgba(103, 232, 249, 0.16), transparent 20%),
+      linear-gradient(135deg, rgba(8, 17, 31, 0.98), rgba(15, 118, 110, 0.94), rgba(8, 145, 178, 0.92));
+  }
+}
+
+@layer utilities {
+  @keyframes admin-aurora {
+    0% {
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+
+    50% {
+      transform: translate3d(-2%, 2%, 0) scale(1.04);
+    }
+
+    100% {
+      transform: translate3d(2%, -1%, 0) scale(1.08);
+    }
+  }
+
+  @keyframes admin-fade-up {
+    0% {
+      opacity: 0;
+      transform: translate3d(0, 14px, 0);
+    }
+
+    100% {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  body::before {
+    animation: none;
+  }
+}

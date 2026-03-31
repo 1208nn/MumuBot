@@ -1,0 +1,1167 @@
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	neturl "net/url"
+	"os"
+	"path"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"mumu-bot/internal/config"
+	"mumu-bot/internal/memory"
+	"mumu-bot/internal/web/assets"
+	"mumu-bot/internal/web/auth"
+	"mumu-bot/internal/web/services"
+	"mumu-bot/internal/web/views"
+
+	"github.com/a-h/templ"
+	"github.com/go-chi/chi/v5"
+	"gorm.io/gorm"
+)
+
+type RuntimeSnapshot struct {
+	Connected     bool
+	SelfID        int64
+	MCPToolCount  int
+	CurrentMood   *memory.MoodState
+	LearningOn    bool
+	EnabledGroups int
+}
+
+func (r RuntimeSnapshot) Snapshot() RuntimeSnapshot {
+	return r
+}
+
+type RuntimeSource interface {
+	Snapshot() RuntimeSnapshot
+}
+
+type App struct {
+	cfg     *config.Config
+	admin   *services.AdminService
+	auth    *auth.Manager
+	runtime RuntimeSource
+	router  http.Handler
+}
+
+type sortOption struct {
+	Key   string
+	Label string
+}
+
+func New(cfg *config.Config, admin *services.AdminService, runtime RuntimeSource) *App {
+	app := &App{
+		cfg:     cfg,
+		admin:   admin,
+		auth:    auth.NewManager(cfg.Web.AdminKey, 24*time.Hour),
+		runtime: runtime,
+	}
+	app.router = app.routes()
+	return app
+}
+
+func (a *App) Handler() http.Handler {
+	return a.router
+}
+
+func (a *App) Addr() string {
+	return fmt.Sprintf(":%d", a.cfg.Server.Port)
+}
+
+func (a *App) Server() *http.Server {
+	return &http.Server{
+		Addr:    a.Addr(),
+		Handler: a.router,
+	}
+}
+
+func (a *App) routes() http.Handler {
+	r := chi.NewRouter()
+	r.Use(a.sameOriginPostOnly)
+
+	r.Get("/", a.handleRoot)
+	r.Get("/health", a.handleHealth)
+	r.Get("/favicon.ico", a.handleFavicon)
+	r.Handle("/assets/*", http.StripPrefix("/assets/", assets.Handler()))
+	r.Get("/login", a.handleLoginPage)
+	r.Post("/login", a.handleLoginSubmit)
+	r.Post("/logout", a.handleLogout)
+
+	r.Group(func(protected chi.Router) {
+		protected.Use(a.requireAdminEnabled)
+		protected.Use(a.requireSession)
+
+		protected.Get("/admin", a.handleDashboard)
+		protected.Get("/admin/style-cards", a.handleStyleCards)
+		protected.Get("/admin/jargons", a.handleJargons)
+		protected.Get("/admin/stickers", a.handleStickers)
+		protected.Get("/admin/stickers/files/*", a.handleStickerFile)
+		protected.Get("/admin/memories", a.handleMemories)
+		protected.Get("/admin/members", a.handleMembers)
+		protected.Get("/admin/system", a.handleSystem)
+
+		protected.Post("/admin/actions/style-cards/{id}/status", a.handleStyleCardStatusUpdate)
+		protected.Post("/admin/actions/jargons/{id}/status", a.handleJargonStatusUpdate)
+		protected.Post("/admin/actions/stickers/{id}/delete", a.handleStickerDelete)
+		protected.Post("/admin/actions/memories/{id}/delete", a.handleMemoryDelete)
+	})
+
+	return r
+}
+
+func (a *App) handleRoot(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
+func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status": "ok",
+		"name":   "mumu-bot",
+		"time":   time.Now().Format(time.RFC3339),
+	})
+}
+
+func (a *App) handleFavicon(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(views.FaviconSVG()))
+}
+
+func (a *App) handleStickerFile(w http.ResponseWriter, r *http.Request) {
+	if a.admin == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	baseDir := strings.TrimSpace(a.admin.StickerDir())
+	rawPath := strings.TrimSpace(chi.URLParam(r, "*"))
+	if baseDir == "" || rawPath == "" || strings.Contains(rawPath, `\`) {
+		http.NotFound(w, r)
+		return
+	}
+
+	cleanPath := path.Clean("/" + rawPath)
+	if cleanPath == "/" || strings.HasPrefix(cleanPath, "/../") || strings.HasSuffix(rawPath, "/") {
+		http.NotFound(w, r)
+		return
+	}
+
+	relativePath := strings.TrimPrefix(cleanPath, "/")
+	filePath := filepath.Join(baseDir, filepath.FromSlash(relativePath))
+	absBase, err := filepath.Abs(baseDir)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	absFile, err := filepath.Abs(filePath)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if absFile != absBase && !strings.HasPrefix(absFile, absBase+string(os.PathSeparator)) {
+		http.NotFound(w, r)
+		return
+	}
+
+	info, err := os.Stat(absFile)
+	if err != nil || info.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	http.ServeFile(w, r, absFile)
+}
+
+func (a *App) handleLoginPage(w http.ResponseWriter, r *http.Request) {
+	if !a.auth.Enabled() {
+		a.renderStatus(w, http.StatusServiceUnavailable, views.DisabledPage())
+		return
+	}
+
+	a.render(w, views.LoginPage(views.LoginPageData{
+		Enabled: true,
+		Error:   "",
+	}))
+}
+
+func (a *App) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
+	if !a.auth.Enabled() {
+		a.renderStatus(w, http.StatusServiceUnavailable, views.DisabledPage())
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		a.renderStatus(w, http.StatusBadRequest, views.LoginPage(views.LoginPageData{
+			Enabled: true,
+			Error:   "请求格式错误",
+		}))
+		return
+	}
+
+	adminKey := strings.TrimSpace(r.FormValue("admin_key"))
+	if !a.auth.CheckKey(adminKey) {
+		a.renderStatus(w, http.StatusUnauthorized, views.LoginPage(views.LoginPageData{
+			Enabled: true,
+			Error:   "密钥错误",
+		}))
+		return
+	}
+
+	token, expiresAt, err := a.auth.CreateSession()
+	if err != nil {
+		http.Error(w, "登录失败，请稍后再试。", http.StatusInternalServerError)
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.SessionCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  expiresAt,
+	})
+
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
+func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie(auth.SessionCookieName); err == nil {
+		a.auth.DeleteSession(cookie.Value)
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     auth.SessionCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+func (a *App) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	stats, err := a.admin.OverviewStats()
+	if err != nil {
+		http.Error(w, "总览加载失败，请稍后再试。", http.StatusInternalServerError)
+		return
+	}
+
+	snapshot := a.runtimeSnapshot()
+	if snapshot.EnabledGroups == 0 {
+		snapshot.EnabledGroups = countEnabledGroups(a.cfg.Groups)
+	}
+	if snapshot.CurrentMood == nil {
+		if mood, err := a.loadCurrentMood(); err == nil {
+			snapshot.CurrentMood = mood
+		}
+	}
+	if !snapshot.LearningOn {
+		snapshot.LearningOn = a.cfg.Learning.Enabled
+	}
+	flash := a.flashFromRequest(r)
+
+	a.render(w, views.DashboardPage(views.DashboardPageData{
+		BotName:           a.cfg.Persona.Name,
+		EnabledGroupCount: snapshot.EnabledGroups,
+		MemoryCount:       stats.MemoryCount,
+		MemberCount:       stats.MemberCount,
+		JargonCount:       stats.JargonCount,
+		StyleCardCount:    stats.StyleCardCount,
+		StickerCount:      stats.StickerCount,
+		OneBotConnected:   snapshot.Connected,
+		SelfID:            snapshot.SelfID,
+		MCPToolCount:      snapshot.MCPToolCount,
+		LearningEnabled:   snapshot.LearningOn,
+		CurrentMood:       snapshot.CurrentMood,
+		Flash:             flash,
+	}, r.URL.Path))
+}
+
+func (a *App) handleStyleCards(w http.ResponseWriter, r *http.Request) {
+	data, err := a.styleCardPageData(r.URL, a.flashFromRequest(r))
+	if err != nil {
+		http.Error(w, "风格卡片列表加载失败，请稍后再试。", http.StatusInternalServerError)
+		return
+	}
+
+	a.renderPageResponse(w, r, views.StyleCardListPage(data, r.URL.Path), views.PageContent(views.StyleCardListBody(data)))
+}
+
+func (a *App) handleJargons(w http.ResponseWriter, r *http.Request) {
+	data, err := a.jargonPageData(r.URL, a.flashFromRequest(r))
+	if err != nil {
+		http.Error(w, "黑话列表加载失败，请稍后再试。", http.StatusInternalServerError)
+		return
+	}
+
+	a.renderPageResponse(w, r, views.JargonListPage(data, r.URL.Path), views.PageContent(views.JargonListBody(data)))
+}
+
+func (a *App) handleStickers(w http.ResponseWriter, r *http.Request) {
+	data, err := a.stickerPageData(r.URL, a.flashFromRequest(r))
+	if err != nil {
+		http.Error(w, "表情包列表加载失败，请稍后再试。", http.StatusInternalServerError)
+		return
+	}
+
+	a.renderPageResponse(w, r, views.StickerListPage(data, r.URL.Path), views.PageContent(views.StickerListBody(data)))
+}
+
+func (a *App) handleMemories(w http.ResponseWriter, r *http.Request) {
+	data, err := a.memoryPageData(r.URL, a.flashFromRequest(r))
+	if err != nil {
+		http.Error(w, "记忆列表加载失败，请稍后再试。", http.StatusInternalServerError)
+		return
+	}
+
+	a.renderPageResponse(w, r, views.MemoryListPage(data, r.URL.Path), views.PageContent(views.MemoryListBody(data)))
+}
+
+func (a *App) handleMembers(w http.ResponseWriter, r *http.Request) {
+	sortKey, order := services.NormalizeMemberSort(r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
+	page := parsePositiveInt(r.URL.Query().Get("page"), 1)
+	pageSize := parsePositiveInt(r.URL.Query().Get("page_size"), 20)
+	filter := services.MemberFilter{
+		Keyword:  strings.TrimSpace(r.URL.Query().Get("keyword")),
+		Sort:     sortKey,
+		Order:    order,
+		Page:     page,
+		PageSize: pageSize,
+	}
+
+	result, err := a.admin.ListMemberProfiles(filter)
+	if err != nil {
+		http.Error(w, "成员列表加载失败，请稍后再试。", http.StatusInternalServerError)
+		return
+	}
+
+	data := views.MemberListPageData{
+		Keyword: filter.Keyword,
+		Sort:    buildSortToolbar(r.URL, sortKey, order, []sortOption{{Key: "messages", Label: "发言数"}, {Key: "activity", Label: "活跃度"}, {Key: "intimacy", Label: "亲密度"}, {Key: "recent", Label: "最近发言"}, {Key: "updated", Label: "最近更新"}}),
+		Items:   result.Items,
+		Meta:    a.listMeta(r.URL, result.Page, result.PageSize, result.Total),
+		Flash:   a.flashFromRequest(r),
+	}
+
+	a.renderPageResponse(w, r, views.MemberListPage(data, r.URL.Path), views.PageContent(views.MemberListBody(data)))
+}
+
+func (a *App) handleSystem(w http.ResponseWriter, r *http.Request) {
+	a.render(w, views.SystemPage(views.SystemPageData{
+		Sections: a.systemSections(),
+		Flash:    a.flashFromRequest(r),
+	}, r.URL.Path))
+}
+
+func (a *App) styleCardPageData(current *neturl.URL, flash *views.FlashMessage) (views.StyleCardListPageData, error) {
+	sortKey, order := services.NormalizeStyleCardSort(current.Query().Get("sort"), current.Query().Get("order"))
+	page := parsePositiveInt(current.Query().Get("page"), 1)
+	pageSize := parsePositiveInt(current.Query().Get("page_size"), 20)
+	filter := services.StyleCardFilter{
+		GroupID:  parseInt64(current.Query().Get("group_id")),
+		Status:   strings.TrimSpace(current.Query().Get("status")),
+		Keyword:  strings.TrimSpace(current.Query().Get("keyword")),
+		Sort:     sortKey,
+		Order:    order,
+		Page:     page,
+		PageSize: pageSize,
+	}
+
+	result, err := a.admin.ListStyleCards(filter)
+	if err != nil {
+		return views.StyleCardListPageData{}, err
+	}
+
+	return views.StyleCardListPageData{
+		GroupID: current.Query().Get("group_id"),
+		Status:  filter.Status,
+		Keyword: filter.Keyword,
+		Sort:    buildSortToolbar(current, sortKey, order, []sortOption{{Key: "updated", Label: "最近更新"}, {Key: "created", Label: "创建时间"}, {Key: "use", Label: "使用次数"}, {Key: "evidence", Label: "证据数"}}),
+		Items:   result.Items,
+		Meta:    a.listMeta(current, result.Page, result.PageSize, result.Total),
+		Flash:   flash,
+	}, nil
+}
+
+func (a *App) jargonPageData(current *neturl.URL, flash *views.FlashMessage) (views.JargonListPageData, error) {
+	sortKey, order := services.NormalizeJargonSort(current.Query().Get("sort"), current.Query().Get("order"))
+	page := parsePositiveInt(current.Query().Get("page"), 1)
+	pageSize := parsePositiveInt(current.Query().Get("page_size"), 20)
+	filter := services.JargonFilter{
+		GroupID:  parseInt64(current.Query().Get("group_id")),
+		Status:   strings.TrimSpace(current.Query().Get("status")),
+		Keyword:  strings.TrimSpace(current.Query().Get("keyword")),
+		Sort:     sortKey,
+		Order:    order,
+		Page:     page,
+		PageSize: pageSize,
+	}
+
+	result, err := a.admin.ListJargons(filter)
+	if err != nil {
+		return views.JargonListPageData{}, err
+	}
+
+	return views.JargonListPageData{
+		GroupID: current.Query().Get("group_id"),
+		Status:  filter.Status,
+		Keyword: filter.Keyword,
+		Sort:    buildSortToolbar(current, sortKey, order, []sortOption{{Key: "updated", Label: "最近更新"}, {Key: "created", Label: "创建时间"}, {Key: "group", Label: "群号"}}),
+		Items:   result.Items,
+		Meta:    a.listMeta(current, result.Page, result.PageSize, result.Total),
+		Flash:   flash,
+	}, nil
+}
+
+func (a *App) stickerPageData(current *neturl.URL, flash *views.FlashMessage) (views.StickerListPageData, error) {
+	sortKey, order := services.NormalizeStickerSort(current.Query().Get("sort"), current.Query().Get("order"))
+	page := parsePositiveInt(current.Query().Get("page"), 1)
+	pageSize := parsePositiveInt(current.Query().Get("page_size"), 20)
+	filter := services.StickerFilter{
+		Keyword:  strings.TrimSpace(current.Query().Get("keyword")),
+		Sort:     sortKey,
+		Order:    order,
+		Page:     page,
+		PageSize: pageSize,
+	}
+
+	result, err := a.admin.ListStickers(filter)
+	if err != nil {
+		return views.StickerListPageData{}, err
+	}
+
+	return views.StickerListPageData{
+		Keyword: filter.Keyword,
+		Sort:    buildSortToolbar(current, sortKey, order, []sortOption{{Key: "use", Label: "使用次数"}, {Key: "updated", Label: "最近更新"}, {Key: "created", Label: "创建时间"}}),
+		Items:   result.Items,
+		Meta:    a.listMeta(current, result.Page, result.PageSize, result.Total),
+		Flash:   flash,
+	}, nil
+}
+
+func (a *App) memoryPageData(current *neturl.URL, flash *views.FlashMessage) (views.MemoryListPageData, error) {
+	sortKey, order := services.NormalizeMemorySort(current.Query().Get("sort"), current.Query().Get("order"))
+	page := parsePositiveInt(current.Query().Get("page"), 1)
+	pageSize := parsePositiveInt(current.Query().Get("page_size"), 20)
+	filter := services.MemoryFilter{
+		GroupID:  parseInt64(current.Query().Get("group_id")),
+		Type:     strings.TrimSpace(current.Query().Get("type")),
+		Keyword:  strings.TrimSpace(current.Query().Get("keyword")),
+		Sort:     sortKey,
+		Order:    order,
+		Page:     page,
+		PageSize: pageSize,
+	}
+
+	result, err := a.admin.ListMemories(filter)
+	if err != nil {
+		return views.MemoryListPageData{}, err
+	}
+
+	return views.MemoryListPageData{
+		GroupID: current.Query().Get("group_id"),
+		Type:    filter.Type,
+		Keyword: filter.Keyword,
+		Sort:    buildSortToolbar(current, sortKey, order, []sortOption{{Key: "updated", Label: "最近更新"}, {Key: "created", Label: "创建时间"}, {Key: "access", Label: "访问量"}, {Key: "importance", Label: "重要度"}}),
+		Items:   result.Items,
+		Meta:    a.listMeta(current, result.Page, result.PageSize, result.Total),
+		Flash:   flash,
+	}, nil
+}
+
+func (a *App) handleStyleCardStatusUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "风格卡片状态更新失败", Body: "请求格式不正确。"})
+		return
+	}
+
+	id, err := parseUintParam(chi.URLParam(r, "id"))
+	if err != nil {
+		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "风格卡片状态更新失败", Body: "记录编号无效。"})
+		return
+	}
+
+	if err := a.admin.UpdateStyleCardStatus(id, r.FormValue("status")); err != nil {
+		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "风格卡片状态更新失败", Body: styleCardActionErrorText(err)})
+		return
+	}
+
+	if err := a.respondActionSuccess(w, r, "/admin/style-cards", &views.FlashMessage{
+		Kind:  "success",
+		Title: "风格卡片状态已更新",
+	}, func(current *neturl.URL) (templ.Component, error) {
+		data, err := a.styleCardPageData(current, nil)
+		if err != nil {
+			return nil, err
+		}
+		return views.PageContent(views.StyleCardListBody(data)), nil
+	}); err != nil {
+		a.respondActionError(w, r, http.StatusInternalServerError, &views.FlashMessage{Kind: "error", Title: "风格卡片状态更新失败", Body: "列表刷新失败，请稍后再试。"})
+	}
+}
+
+func (a *App) handleJargonStatusUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "黑话状态更新失败", Body: "请求格式不正确。"})
+		return
+	}
+
+	id, err := parseUintParam(chi.URLParam(r, "id"))
+	if err != nil {
+		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "黑话状态更新失败", Body: "记录编号无效。"})
+		return
+	}
+
+	if err := a.admin.UpdateJargonStatus(id, r.FormValue("status")); err != nil {
+		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "黑话状态更新失败", Body: jargonActionErrorText(err)})
+		return
+	}
+
+	if err := a.respondActionSuccess(w, r, "/admin/jargons", &views.FlashMessage{
+		Kind:  "success",
+		Title: "黑话状态已更新",
+	}, func(current *neturl.URL) (templ.Component, error) {
+		data, err := a.jargonPageData(current, nil)
+		if err != nil {
+			return nil, err
+		}
+		return views.PageContent(views.JargonListBody(data)), nil
+	}); err != nil {
+		a.respondActionError(w, r, http.StatusInternalServerError, &views.FlashMessage{Kind: "error", Title: "黑话状态更新失败", Body: "列表刷新失败，请稍后再试。"})
+	}
+}
+
+func (a *App) handleStickerDelete(w http.ResponseWriter, r *http.Request) {
+	id, err := parseUintParam(chi.URLParam(r, "id"))
+	if err != nil {
+		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "表情包删除失败", Body: "记录编号无效。"})
+		return
+	}
+
+	if err := a.admin.DeleteSticker(id); err != nil {
+		a.respondActionError(w, r, http.StatusInternalServerError, &views.FlashMessage{Kind: "error", Title: "表情包删除失败", Body: deleteActionErrorText(err)})
+		return
+	}
+
+	if err := a.respondActionSuccess(w, r, "/admin/stickers", &views.FlashMessage{
+		Kind:  "success",
+		Title: "表情包已删除",
+	}, func(current *neturl.URL) (templ.Component, error) {
+		data, err := a.stickerPageData(current, nil)
+		if err != nil {
+			return nil, err
+		}
+		return views.PageContent(views.StickerListBody(data)), nil
+	}); err != nil {
+		a.respondActionError(w, r, http.StatusInternalServerError, &views.FlashMessage{Kind: "error", Title: "表情包删除失败", Body: "列表刷新失败，请稍后再试。"})
+	}
+}
+
+func (a *App) handleMemoryDelete(w http.ResponseWriter, r *http.Request) {
+	id, err := parseUintParam(chi.URLParam(r, "id"))
+	if err != nil {
+		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "记忆删除失败", Body: "记录编号无效。"})
+		return
+	}
+
+	if err := a.admin.DeleteMemory(id); err != nil {
+		a.respondActionError(w, r, http.StatusInternalServerError, &views.FlashMessage{Kind: "error", Title: "记忆删除失败", Body: deleteActionErrorText(err)})
+		return
+	}
+
+	if err := a.respondActionSuccess(w, r, "/admin/memories", &views.FlashMessage{
+		Kind:  "success",
+		Title: "记忆已删除",
+	}, func(current *neturl.URL) (templ.Component, error) {
+		data, err := a.memoryPageData(current, nil)
+		if err != nil {
+			return nil, err
+		}
+		return views.PageContent(views.MemoryListBody(data)), nil
+	}); err != nil {
+		a.respondActionError(w, r, http.StatusInternalServerError, &views.FlashMessage{Kind: "error", Title: "记忆删除失败", Body: "列表刷新失败，请稍后再试。"})
+	}
+}
+
+func (a *App) requireAdminEnabled(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !a.auth.Enabled() {
+			a.renderStatus(w, http.StatusServiceUnavailable, views.DisabledPage())
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (a *App) requireSession(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie(auth.SessionCookieName)
+		if err != nil || !a.auth.IsAuthenticated(cookie.Value) {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (a *App) sameOriginPostOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			origin := strings.TrimSpace(r.Header.Get("Origin"))
+			if origin != "" {
+				originURL, err := neturl.Parse(origin)
+				if err != nil || originURL.Host != r.Host || (originURL.Scheme != "http" && originURL.Scheme != "https") {
+					http.Error(w, "请求来源无效。", http.StatusForbidden)
+					return
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (a *App) render(w http.ResponseWriter, component templ.Component) {
+	a.renderStatus(w, http.StatusOK, component)
+}
+
+func (a *App) renderStatus(w http.ResponseWriter, status int, component templ.Component) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	_ = component.Render(context.Background(), w)
+}
+
+func (a *App) renderPageResponse(w http.ResponseWriter, r *http.Request, full templ.Component, body templ.Component) {
+	if isHTMXRequest(r) {
+		a.render(w, body)
+		return
+	}
+	a.render(w, full)
+}
+
+func (a *App) runtimeSnapshot() RuntimeSnapshot {
+	if a.runtime == nil {
+		return RuntimeSnapshot{}
+	}
+	return a.runtime.Snapshot()
+}
+
+func (a *App) loadCurrentMood() (*memory.MoodState, error) {
+	if a.admin == nil || a.admin.DB() == nil {
+		return nil, fmt.Errorf("database unavailable")
+	}
+	var mood memory.MoodState
+	if err := a.admin.DB().First(&mood).Error; err != nil {
+		return nil, err
+	}
+	return &mood, nil
+}
+
+func (a *App) listMeta(current *neturl.URL, page, pageSize int, total int64) views.ListMeta {
+	meta := views.ListMeta{
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+	}
+	if page > 1 {
+		meta.PrevURL = withPage(current, page-1)
+	}
+	if int64(page*pageSize) < total {
+		meta.NextURL = withPage(current, page+1)
+	}
+	return meta
+}
+
+func isHTMXRequest(r *http.Request) bool {
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("HX-Request")), "true")
+}
+
+func (a *App) actionTargetURL(r *http.Request, fallback string) *neturl.URL {
+	fallbackURL, err := neturl.Parse(strings.TrimSpace(fallback))
+	if err != nil || fallbackURL.Path == "" {
+		fallbackURL = &neturl.URL{Path: "/admin"}
+	}
+
+	candidates := []string{
+		strings.TrimSpace(r.FormValue("return_to")),
+		strings.TrimSpace(r.Header.Get("Referer")),
+		strings.TrimSpace(fallback),
+	}
+
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		parsed, err := neturl.Parse(candidate)
+		if err != nil {
+			continue
+		}
+		if parsed.Path == "" {
+			parsed.Path = fallbackURL.Path
+		}
+		if !isSafeAdminTarget(parsed) {
+			continue
+		}
+		return &neturl.URL{Path: parsed.Path, RawQuery: parsed.RawQuery}
+	}
+
+	return &neturl.URL{Path: fallbackURL.Path, RawQuery: fallbackURL.RawQuery}
+}
+
+func (a *App) respondActionSuccess(w http.ResponseWriter, r *http.Request, fallback string, flash *views.FlashMessage, render func(current *neturl.URL) (templ.Component, error)) error {
+	target := a.actionTargetURL(r, fallback)
+	if !isHTMXRequest(r) {
+		if flash == nil {
+			http.Redirect(w, r, target.String(), http.StatusSeeOther)
+			return nil
+		}
+		http.Redirect(w, r, withFlash(target.String(), flash.Kind, flash.Title, flash.Body), http.StatusSeeOther)
+		return nil
+	}
+
+	component, err := render(target)
+	if err != nil {
+		return err
+	}
+
+	if trigger, err := actionTriggerHeader(flash, true); err == nil && trigger != "" {
+		w.Header().Set("HX-Trigger", trigger)
+	}
+	a.renderStatus(w, http.StatusOK, component)
+	return nil
+}
+
+func (a *App) respondActionError(w http.ResponseWriter, r *http.Request, status int, flash *views.FlashMessage) {
+	if !isHTMXRequest(r) {
+		message := "请求失败"
+		if flash != nil {
+			message = strings.TrimSpace(flash.Title)
+			if body := strings.TrimSpace(flash.Body); body != "" {
+				message = body
+			}
+		}
+		http.Error(w, message, status)
+		return
+	}
+
+	if trigger, err := actionTriggerHeader(flash, false); err == nil && trigger != "" {
+		w.Header().Set("HX-Trigger", trigger)
+	}
+	w.Header().Set("HX-Reswap", "none")
+	w.WriteHeader(status)
+}
+
+func (a *App) flashFromRequest(r *http.Request) *views.FlashMessage {
+	title := strings.TrimSpace(r.URL.Query().Get("flash_title"))
+	if title == "" {
+		return nil
+	}
+	return &views.FlashMessage{
+		Kind:  strings.TrimSpace(r.URL.Query().Get("flash_kind")),
+		Title: title,
+		Body:  strings.TrimSpace(r.URL.Query().Get("flash_body")),
+	}
+}
+
+func (a *App) systemSections() []views.SystemSection {
+	cfg := a.cfg
+	snapshot := a.runtimeSnapshot()
+
+	groupIDs := make([]string, 0, len(cfg.Groups))
+	for _, group := range cfg.Groups {
+		if group.Enabled {
+			groupIDs = append(groupIDs, fmt.Sprintf("%d", group.GroupID))
+		}
+	}
+	groupSummary := "无"
+	if len(groupIDs) > 0 {
+		groupSummary = strings.Join(groupIDs, "、")
+	}
+
+	return []views.SystemSection{
+		{
+			Title: "人格设定",
+			Fields: []views.SystemField{
+				{Label: "名称", Value: emptyDash(cfg.Persona.Name)},
+				{Label: "QQ", Value: fmt.Sprintf("%d", cfg.Persona.QQ)},
+				{Label: "别名", Value: joinOrDash(cfg.Persona.AliasNames)},
+				{Label: "说话风格", Value: formatSpeakingStyle(cfg.Persona.SpeakingStyle)},
+			},
+		},
+		{
+			Title: "启用群聊",
+			Fields: []views.SystemField{
+				{Label: "总群数", Value: fmt.Sprintf("%d", len(cfg.Groups))},
+				{Label: "启用群数", Value: fmt.Sprintf("%d", countEnabledGroups(cfg.Groups))},
+				{Label: "已启用群聊", Value: groupSummary},
+			},
+		},
+		{
+			Title: "行为与学习",
+			Fields: []views.SystemField{
+				{Label: "观察窗口", Value: fmt.Sprintf("%d 秒", cfg.Agent.ObserveWindow)},
+				{Label: "思考间隔", Value: fmt.Sprintf("%d 秒", cfg.Agent.ThinkInterval)},
+				{Label: "学习启用", Value: yesNoText(cfg.Learning.Enabled)},
+				{Label: "学习批大小", Value: fmt.Sprintf("%d", cfg.Learning.BatchSize)},
+			},
+		},
+		{
+			Title: "能力概览",
+			Fields: []views.SystemField{
+				{Label: "对话回复", Value: requiredCapabilityText(cfg.LLM.Model)},
+				{Label: "辅助判断", Value: optionalCapabilityText(false, cfg.AuxiliaryModel.Model)},
+				{Label: "记忆检索", Value: optionalCapabilityText(cfg.Embedding.Enabled, cfg.Embedding.Model)},
+				{Label: "图片理解", Value: optionalCapabilityText(cfg.VisionLLM.Enabled, cfg.VisionLLM.Model)},
+			},
+		},
+		{
+			Title: "连接状态",
+			Fields: []views.SystemField{
+				{Label: "消息接入", Value: serviceLocationText(cfg.OneBot.WsURL)},
+				{Label: "访问保护", Value: configuredText(cfg.OneBot.AccessToken)},
+				{Label: "连接状态", Value: connectionText(snapshot.Connected)},
+				{Label: "机器人 QQ", Value: fmt.Sprintf("%d", snapshot.SelfID)},
+			},
+		},
+		{
+			Title: "数据状态",
+			Fields: []views.SystemField{
+				{Label: "数据存储", Value: dataServiceText(cfg.Memory.MySQL.Host, cfg.Memory.MySQL.DBName)},
+				{Label: "访问保护", Value: configuredText(cfg.Memory.MySQL.Password)},
+				{Label: "检索能力", Value: vectorServiceText(cfg.Memory.Milvus.Address, cfg.Memory.Milvus.CollectionName)},
+				{Label: "准备状态", Value: collectionReadyText(cfg.Memory.Milvus.CollectionName)},
+			},
+		},
+		{
+			Title: "登录与扩展",
+			Fields: []views.SystemField{
+				{Label: "登录方式", Value: "密码登录"},
+				{Label: "登录保护", Value: configuredText(cfg.Web.AdminKey)},
+				{Label: "扩展工具", Value: fmt.Sprintf("%d 个", snapshot.MCPToolCount)},
+				{Label: "扩展状态", Value: extensionStatusText(snapshot.MCPToolCount)},
+			},
+		},
+	}
+}
+
+func isSafeAdminTarget(target *neturl.URL) bool {
+	if target == nil {
+		return false
+	}
+	if target.IsAbs() || strings.TrimSpace(target.Host) != "" {
+		return false
+	}
+	cleanPath := strings.TrimSpace(target.Path)
+	if cleanPath == "" {
+		return false
+	}
+	return strings.HasPrefix(cleanPath, "/admin")
+}
+
+func withPage(current *neturl.URL, page int) string {
+	cloned := *current
+	query := cloned.Query()
+	query.Set("page", strconv.Itoa(page))
+	cloned.RawQuery = query.Encode()
+	if cloned.RawPath != "" {
+		return cloned.RawPath + "?" + cloned.RawQuery
+	}
+	if cloned.RawQuery == "" {
+		return cloned.Path
+	}
+	return cloned.Path + "?" + cloned.RawQuery
+}
+
+func withFlash(target string, kind string, title string, body string) string {
+	parsed, err := neturl.Parse(target)
+	if err != nil {
+		return target
+	}
+	query := parsed.Query()
+	query.Set("flash_kind", kind)
+	query.Set("flash_title", title)
+	if strings.TrimSpace(body) != "" {
+		query.Set("flash_body", body)
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+func actionTriggerHeader(flash *views.FlashMessage, closeDialog bool) (string, error) {
+	if flash == nil && !closeDialog {
+		return "", nil
+	}
+
+	payload := make(map[string]any)
+	if flash != nil {
+		payload["admin:toast"] = map[string]string{
+			"kind":  strings.TrimSpace(flash.Kind),
+			"title": strings.TrimSpace(flash.Title),
+			"body":  strings.TrimSpace(flash.Body),
+		}
+	}
+	if closeDialog {
+		payload["admin:action-dialog-close"] = true
+	}
+
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+func parsePositiveInt(raw string, fallback int) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func parseInt64(raw string) int64 {
+	value, _ := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	return value
+}
+
+func parseUintParam(raw string) (uint, error) {
+	value, err := strconv.ParseUint(strings.TrimSpace(raw), 10, 64)
+	return uint(value), err
+}
+
+func countEnabledGroups(groups []config.GroupConfig) int {
+	total := 0
+	for _, group := range groups {
+		if group.Enabled {
+			total++
+		}
+	}
+	return total
+}
+
+func configuredText(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "未设置"
+	}
+	return "已设置"
+}
+
+func joinOrDash(values []string) string {
+	if len(values) == 0 {
+		return "-"
+	}
+	return strings.Join(values, "、")
+}
+
+func emptyDash(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "-"
+	}
+	return value
+}
+
+func yesNoText(value bool) string {
+	if value {
+		return "是"
+	}
+	return "否"
+}
+
+func connectionText(value bool) string {
+	if value {
+		return "已连接"
+	}
+	return "未连接"
+}
+
+func extensionStatusText(count int) string {
+	if count > 0 {
+		return "可用"
+	}
+	return "未接入"
+}
+
+func requiredCapabilityText(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "未接入"
+	}
+	return "已接入"
+}
+
+func optionalCapabilityText(enabled bool, value string) string {
+	if strings.TrimSpace(value) == "" {
+		if enabled {
+			return "未接入"
+		}
+		return "未启用"
+	}
+	return "已接入"
+}
+
+func serviceLocationText(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return "未接入"
+	}
+	return "已接入"
+}
+
+func dataServiceText(host string, dbName string) string {
+	if strings.TrimSpace(host) == "" || strings.TrimSpace(dbName) == "" {
+		return "未接入"
+	}
+	return "已接入"
+}
+
+func vectorServiceText(address string, collection string) string {
+	if strings.TrimSpace(address) == "" || strings.TrimSpace(collection) == "" {
+		return "未接入"
+	}
+	return "已接入"
+}
+
+func collectionReadyText(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "未就绪"
+	}
+	return "已就绪"
+}
+
+func styleCardActionErrorText(err error) string {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "这张风格卡片不存在或已经被处理。"
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "invalid") {
+		return "这次状态变更无效，请刷新列表后重试。"
+	}
+	return "更新失败，请稍后再试。"
+}
+
+func jargonActionErrorText(err error) string {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "这条黑话不存在或已经被处理。"
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "invalid") {
+		return "这次状态变更无效，请刷新列表后重试。"
+	}
+	return "更新失败，请稍后再试。"
+}
+
+func deleteActionErrorText(err error) string {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "这条记录不存在或已经被删除。"
+	}
+	return "删除失败，请稍后再试。"
+}
+
+func formatSpeakingStyle(value string) string {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return "-"
+	}
+
+	parts := strings.FieldsFunc(text, func(r rune) bool {
+		switch r {
+		case '\n', '\r', '，', '；', '。', ';':
+			return true
+		default:
+			return false
+		}
+	})
+
+	lines := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		lines = append(lines, part)
+	}
+	if len(lines) == 0 {
+		return "-"
+	}
+	return strings.Join(lines, "\n")
+}
+
+func buildSortToolbar(current *neturl.URL, currentSort string, currentOrder string, options []sortOption) views.SortToolbarData {
+	data := views.SortToolbarData{
+		CurrentSort:  currentSort,
+		CurrentOrder: currentOrder,
+		Options:      make([]views.SortToolbarLink, 0, len(options)),
+		OrderOptions: make([]views.SortToolbarLink, 0, 2),
+	}
+
+	activeSortLabel := ""
+	for _, option := range options {
+		active := option.Key == currentSort
+		if active {
+			activeSortLabel = option.Label
+		}
+		data.Options = append(data.Options, views.SortToolbarLink{
+			Label:  option.Label,
+			Href:   withQueryValues(current, true, map[string]string{"sort": option.Key}),
+			Active: active,
+		})
+	}
+	if activeSortLabel == "" && len(options) > 0 {
+		activeSortLabel = options[0].Label
+	}
+
+	orderLabel := "倒序"
+	for _, option := range []struct {
+		value string
+		label string
+	}{
+		{value: "desc", label: "倒序"},
+		{value: "asc", label: "正序"},
+	} {
+		active := option.value == currentOrder
+		if active {
+			orderLabel = option.label
+		}
+		data.OrderOptions = append(data.OrderOptions, views.SortToolbarLink{
+			Label:  option.label,
+			Href:   withQueryValues(current, true, map[string]string{"order": option.value}),
+			Active: active,
+		})
+	}
+
+	data.Summary = fmt.Sprintf("当前按%s%s查看", activeSortLabel, orderLabel)
+	return data
+}
+
+func withQueryValues(current *neturl.URL, resetPage bool, updates map[string]string) string {
+	cloned := *current
+	query := cloned.Query()
+	if resetPage {
+		query.Set("page", "1")
+	}
+	for key, value := range updates {
+		if strings.TrimSpace(value) == "" {
+			query.Del(key)
+			continue
+		}
+		query.Set(key, value)
+	}
+	cloned.RawQuery = query.Encode()
+	if cloned.RawPath != "" {
+		if cloned.RawQuery == "" {
+			return cloned.RawPath
+		}
+		return cloned.RawPath + "?" + cloned.RawQuery
+	}
+	if cloned.RawQuery == "" {
+		return cloned.Path
+	}
+	return cloned.Path + "?" + cloned.RawQuery
+}
