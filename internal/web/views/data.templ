@@ -143,7 +143,7 @@ templ MemoryListBody(data MemoryListPageData) {
 	<div class="space-y-6">
 		@PageHeader("记忆", "按群号、类型和关键词筛选记忆。", "记忆检索")
 		<div class="space-y-4 rounded-[1.7rem] border border-white/70 bg-white/82 p-4 shadow-[0_22px_60px_rgba(14,31,53,0.08)] backdrop-blur-xl motion-safe:animate-[admin-fade-up_220ms_ease-out] sm:p-5">
-			@FilterAccordion("memory-filters", "筛选条件", "按群号或关键词查找记忆，再按类型快速收窄结果。", ChoiceFilterGroup("type", data.Type, []FilterChoice{
+			@FilterAccordion("memory-filters", "筛选条件", "按群号或关键词查找记忆，再按类型快速收窄结果。", ChoiceFilterGroup("type", "memory-filter-form", data.Type, []FilterChoice{
 				{Label: "全部类型", Value: ""},
 				{Label: "群长期事实", Value: "group_fact"},
 				{Label: "自身经历", Value: "self_experience"},
@@ -202,7 +202,7 @@ templ MemoryListBody(data MemoryListPageData) {
 }
 
 templ MemoryFilterForm(data MemoryListPageData) {
-	<form class="grid gap-2.5 xl:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] xl:items-center" method="get" action="/admin/memories" hx-get="/admin/memories" hx-target="#admin-page-body" hx-swap="outerHTML" hx-push-url="true">
+	<form id="memory-filter-form" class="grid gap-2.5 xl:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] xl:items-center" method="get" action="/admin/memories" hx-get="/admin/memories" hx-target="#admin-page-body" hx-swap="outerHTML" hx-push-url="true">
 		<input type="hidden" name="sort" value={ data.Sort.CurrentSort }/>
 		<input type="hidden" name="order" value={ data.Sort.CurrentOrder }/>
 		<input class="block w-full min-w-0 rounded-2xl border-slate-200/80 bg-white/90 px-4 py-2.5 text-sm text-slate-800 shadow-none placeholder:text-slate-400 focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100" type="text" name="group_id" value={ data.GroupID } placeholder="群号"/>

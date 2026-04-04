@@ -54,22 +54,22 @@ templ LayoutWithOverlay(data LayoutData, content templ.Component, overlay templ.
 					</div>
 				</div>
 			</header>
-			<div class="mx-auto flex min-h-screen w-full max-w-[1512px] gap-4 px-3 lg:px-4 xl:px-5">
-				<aside class="hidden w-[16rem] shrink-0 px-3 py-6 lg:block">
+			<div x-data="adminSidebarState()" data-admin-sidebar-shell="true" class="mx-auto flex min-h-screen w-full max-w-[1512px] gap-4 px-3 lg:px-4 xl:px-5">
+				<aside x-bind:class="collapsed ? 'w-[5.5rem]' : 'w-[16rem]'" class="hidden shrink-0 px-3 py-6 transition-[width] duration-300 ease-out lg:block">
 					<div class="sticky top-6">
 						@SidebarPanel(data, false)
 					</div>
 				</aside>
 				<div
 					id="admin-sidebar-overlay"
-					class="hs-overlay hidden fixed inset-0 z-[90] overflow-hidden bg-white/55 opacity-0 backdrop-blur-sm transition-opacity duration-300 ease-out hs-overlay-open:opacity-100 lg:hidden"
+					class="hs-overlay hidden fixed inset-0 z-[90] overflow-hidden bg-transparent opacity-0 transition-opacity duration-300 ease-out hs-overlay-open:opacity-100 lg:hidden"
 					tabindex="-1"
 					aria-labelledby="admin-sidebar-title">
-					<div class="hs-overlay-animation-target h-full max-w-[20.5rem] -translate-x-full p-3 transition-transform duration-300 ease-out hs-overlay-open:translate-x-0">
+					<div class="hs-overlay-animation-target h-full max-w-[15.5rem] -translate-x-full p-3 transition-transform duration-300 ease-out hs-overlay-open:translate-x-0">
 						@SidebarPanel(data, true)
 					</div>
 				</div>
-				<main class="min-w-0 flex-1 px-3 pb-8 pt-5 sm:px-4 lg:px-5 lg:pb-12 lg:pt-8">
+				<main class="min-w-0 flex-1 px-3 pb-8 pt-5 transition-[width,padding] duration-300 ease-out sm:px-4 lg:px-5 lg:pb-12 lg:pt-8">
 					@PageContent(content)
 				</main>
 			</div>
@@ -163,7 +163,7 @@ templ AdminActionDialog() {
 }
 
 templ SidebarPanel(data LayoutData, mobile bool) {
-	<div class={ joinClasses("relative flex w-full flex-col overflow-hidden rounded-[1.7rem] border border-white/70 bg-white/82 p-4 shadow-[0_22px_60px_rgba(14,31,53,0.08)] backdrop-blur-xl", ternaryString(mobile, "h-[calc(100vh-1.5rem)] w-[min(18.75rem,calc(100vw-1.5rem))]", "h-auto")) }>
+	<div class={ joinClasses("relative flex w-full flex-col overflow-hidden rounded-[1.7rem] border border-white/70 bg-white/82 p-4 shadow-[0_22px_60px_rgba(14,31,53,0.08)] backdrop-blur-xl transition-[padding] duration-300 ease-out", ternaryString(mobile, "h-[calc(100vh-1.5rem)] w-[min(15.5rem,calc(100vw-2rem))]", "h-auto")) } x-bind:class={ ternaryString(mobile, "''", "collapsed ? 'px-2.5 py-4' : ''") }>
 		if mobile {
 			<div class="mb-3 flex justify-end">
 				<button
@@ -179,25 +179,52 @@ templ SidebarPanel(data LayoutData, mobile bool) {
 					</svg>
 				</button>
 			</div>
+		} else {
+			<div class="mb-3 flex justify-end">
+				<button
+					type="button"
+					class="inline-flex size-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/82 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] transition duration-200 ease-out hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+					x-on:click="toggle()"
+					x-bind:aria-pressed="collapsed.toString()"
+					aria-label="收起或展开导航">
+					<span class="sr-only">收起或展开导航</span>
+					<svg class="size-4 transition-transform duration-300 ease-out" x-bind:class="collapsed ? 'rotate-180' : ''" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+						<path d="m12.5 5-5 5 5 5"></path>
+					</svg>
+				</button>
+			</div>
 		}
-		<div class="rounded-[1.45rem] border border-white/80 bg-white/72 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
-			<div class="inline-flex items-center rounded-full bg-gradient-to-r from-teal-100 to-cyan-100 px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.12em] text-teal-700">管理后台</div>
-			<h1 id="admin-sidebar-title" class="mt-3 text-[1.45rem] font-extrabold leading-none tracking-[-0.05em] text-slate-950">数据概览</h1>
-			<p class="mt-2.5 text-sm leading-6 text-slate-600">查看运行状态、内容数据和系统信息。</p>
+		<div class="rounded-[1.45rem] border border-white/80 bg-white/72 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] transition-[padding] duration-300 ease-out" x-bind:class={ ternaryString(mobile, "''", "collapsed ? 'px-2.5 py-3' : ''") }>
+			<div class="flex items-start gap-3" x-bind:class={ ternaryString(mobile, "''", "collapsed ? 'justify-center' : ''") }>
+				<div class="inline-flex size-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-r from-teal-100 to-cyan-100 text-sm font-extrabold uppercase tracking-[0.12em] text-teal-700">M</div>
+				<div class="min-w-0" x-cloak x-show={ ternaryString(mobile, "true", "!collapsed") } x-transition.opacity.duration.180ms>
+					<div class="inline-flex items-center rounded-full bg-gradient-to-r from-teal-100 to-cyan-100 px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.12em] text-teal-700">导航</div>
+					<h1 id="admin-sidebar-title" class="mt-3 text-[1.2rem] font-extrabold leading-none tracking-[-0.04em] text-slate-950">页面切换</h1>
+				</div>
+			</div>
 		</div>
 		<nav class="mt-4 grid gap-1.5">
 			for _, item := range data.NavItems {
-				<a href={ item.Href } class={ navClass(data.CurrentPath, item.Href) }>
+				<a href={ item.Href } title={ item.Label } class={ navClass(data.CurrentPath, item.Href) } x-bind:class={ ternaryString(mobile, "''", "collapsed ? 'justify-center px-0' : ''") }>
 					<span class="inline-flex size-8 shrink-0 items-center justify-center rounded-2xl bg-white/14 text-current ring-1 ring-current/8">
 						@AdminIcon(navIconName(item.Href), "size-4", "nav-"+navIconName(item.Href))
 					</span>
-					<span>{ item.Label }</span>
+					<span x-cloak x-show={ ternaryString(mobile, "true", "!collapsed") } x-transition.opacity.duration.150ms>{ item.Label }</span>
 				</a>
 			}
 		</nav>
 		<div class="mt-5 border-t border-slate-200/70 pt-4">
 			<form method="post" action="/logout">
-				<button class="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#101a32_0%,#1e2c4f_58%,#0b7285_120%)] px-4 py-3 text-sm font-semibold text-white shadow-[0_18px_32px_rgba(15,23,42,0.16)] transition duration-200 ease-out hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-wait disabled:opacity-70" type="submit" data-loading-label="退出中">退出登录</button>
+				<button title="退出登录" class="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#101a32_0%,#1e2c4f_58%,#0b7285_120%)] px-4 py-3 text-sm font-semibold text-white shadow-[0_18px_32px_rgba(15,23,42,0.16)] transition duration-200 ease-out hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-wait disabled:opacity-70" type="submit" data-loading-label="退出中" x-bind:class={ ternaryString(mobile, "''", "collapsed ? 'px-0' : ''") }>
+					<span class="inline-flex size-5 items-center justify-center shrink-0">
+						<svg class="size-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+							<path d="M7 4.75H5.75A1.75 1.75 0 0 0 4 6.5v7a1.75 1.75 0 0 0 1.75 1.75H7"></path>
+							<path d="M11 6.5 14.5 10 11 13.5"></path>
+							<path d="M8 10h6.5"></path>
+						</svg>
+					</span>
+					<span x-cloak x-show={ ternaryString(mobile, "true", "!collapsed") } x-transition.opacity.duration.150ms>退出登录</span>
+				</button>
 			</form>
 		</div>
 	</div>
@@ -288,11 +315,11 @@ templ ListFooter(meta ListMeta) {
 	</div>
 }
 
-templ ChoiceFilterGroup(name string, current string, options []FilterChoice) {
+templ ChoiceFilterGroup(name string, formID string, current string, options []FilterChoice) {
 	<div data-admin-choice-group={ name } class="flex flex-wrap items-center gap-2 sm:justify-end">
 		for _, option := range options {
 			<label class={ filterChoiceClass(equalTrimmed(option.Value, current)) }>
-				<input class="sr-only" type="radio" name={ name } value={ option.Value } checked?={ equalTrimmed(option.Value, current) } onchange="window.adminSubmitChoiceFilter && window.adminSubmitChoiceFilter(this)"/>
+				<input class="sr-only" type="radio" name={ name } form={ formID } value={ option.Value } checked?={ equalTrimmed(option.Value, current) } onchange="window.adminSubmitChoiceFilter && window.adminSubmitChoiceFilter(this)"/>
 				<span>{ option.Label }</span>
 			</label>
 		}

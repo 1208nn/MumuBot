@@ -162,13 +162,13 @@ func systemSectionIconName(title string) string {
 	switch strings.TrimSpace(title) {
 	case "人格设定":
 		return "persona"
-	case "群配置", "启用群聊":
+	case "群配置", "启用群聊", "群聊与学习":
 		return "group-config"
 	case "行为与学习":
 		return "behavior"
-	case "模型接入", "智能能力", "能力概览":
+	case "模型接入", "智能能力", "能力概览", "模型能力":
 		return "model"
-	case "OneBot 连接", "连接服务", "消息连接", "连接状态":
+	case "OneBot 连接", "连接服务", "消息连接", "连接状态", "连接与数据":
 		return "connection"
 	case "存储", "数据存储", "数据与检索", "数据状态":
 		return "storage"
@@ -197,7 +197,7 @@ func systemFieldValueClass(field SystemField) string {
 
 func systemFieldNeedsWide(field SystemField) bool {
 	switch strings.TrimSpace(field.Label) {
-	case "说话风格", "已启用群聊", "消息接入", "数据存储", "检索能力":
+	case "说话风格", "人格简介", "已启用群聊", "自动学习", "审核节奏":
 		return true
 	}
 	return len([]rune(strings.TrimSpace(field.Value))) > 32

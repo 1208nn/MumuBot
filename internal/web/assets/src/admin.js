@@ -7,6 +7,7 @@ window.Alpine = Alpine;
 
 const DEFAULT_TOAST_DELAY = 4200;
 const REDUCED_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)");
+const ADMIN_SIDEBAR_STORAGE_KEY = "mumu-admin-sidebar-collapsed";
 
 const TOAST_CLASS_BY_KIND = {
   error:
@@ -40,6 +41,47 @@ const ACTION_CHIP_CLASS_BY_KIND = {
 
 const DEFAULT_ACTION_SUBMIT_CLASS =
   "inline-flex items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#101a32_0%,#1e2c4f_58%,#0b7285_120%)] px-4 py-2.5 text-[13px] font-semibold text-white shadow-[0_18px_32px_rgba(15,23,42,0.16)] transition duration-200 ease-out hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-wait disabled:opacity-70";
+
+document.addEventListener("alpine:init", () => {
+  Alpine.data("adminSidebarState", () => ({
+    collapsed: false,
+    mediaQuery: null,
+    init() {
+      this.mediaQuery = window.matchMedia("(min-width: 1024px)");
+      const sync = () => {
+        this.collapsed = this.mediaQuery.matches ? this.read() : false;
+      };
+      sync();
+      if (typeof this.mediaQuery.addEventListener === "function") {
+        this.mediaQuery.addEventListener("change", sync);
+      } else if (typeof this.mediaQuery.addListener === "function") {
+        this.mediaQuery.addListener(sync);
+      }
+    },
+    isDesktop() {
+      return this.mediaQuery ? this.mediaQuery.matches : window.matchMedia("(min-width: 1024px)").matches;
+    },
+    read() {
+      try {
+        return window.localStorage.getItem(ADMIN_SIDEBAR_STORAGE_KEY) === "true";
+      } catch {
+        return false;
+      }
+    },
+    persist() {
+      try {
+        window.localStorage.setItem(ADMIN_SIDEBAR_STORAGE_KEY, this.collapsed ? "true" : "false");
+      } catch {}
+    },
+    toggle() {
+      if (!this.isDesktop()) {
+        return;
+      }
+      this.collapsed = !this.collapsed;
+      this.persist();
+    },
+  }));
+});
 
 function initAdminInteractions() {
   if (window.HSStaticMethods && typeof window.HSStaticMethods.autoInit === "function") {
@@ -523,16 +565,18 @@ function adminSubmitChoiceFilter(input) {
   const hxGet = String(form.getAttribute("hx-get") || "").trim();
   if (window.htmx && hxGet) {
     const url = new URL(hxGet, window.location.origin);
-    const query = new URLSearchParams(new FormData(form)).toString();
+    const formData = new FormData(form);
+    const values = Object.fromEntries(formData.entries());
+    const query = new URLSearchParams(values).toString();
+    const requestPath = query ? `${url.pathname}?${query}` : url.pathname;
     const target = String(form.getAttribute("hx-target") || "").trim() || "#admin-page-body";
     const swap = String(form.getAttribute("hx-swap") || "").trim() || "outerHTML";
-    const requestPath = query ? `${url.pathname}?${query}` : url.pathname;
 
-    window.htmx.ajax("GET", requestPath, {
-      source: form,
+    window.htmx.ajax("GET", url.pathname, {
       target,
       swap,
-      pushURL: form.getAttribute("hx-push-url") === "true",
+      push: form.getAttribute("hx-push-url") === "true" ? requestPath : false,
+      values,
     });
     return;
   }

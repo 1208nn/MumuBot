@@ -56,6 +56,8 @@ type sortOption struct {
 	Label string
 }
 
+const defaultListPageSize = 15
+
 func New(cfg *config.Config, admin *services.AdminService, runtime RuntimeSource) *App {
 	app := &App{
 		cfg:     cfg,
@@ -332,7 +334,7 @@ func (a *App) handleMemories(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleMembers(w http.ResponseWriter, r *http.Request) {
 	sortKey, order := services.NormalizeMemberSort(r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
 	page := parsePositiveInt(r.URL.Query().Get("page"), 1)
-	pageSize := parsePositiveInt(r.URL.Query().Get("page_size"), 20)
+	pageSize := listPageSize(r.URL.Query().Get("page_size"))
 	filter := services.MemberFilter{
 		Keyword:  strings.TrimSpace(r.URL.Query().Get("keyword")),
 		Sort:     sortKey,
@@ -368,7 +370,7 @@ func (a *App) handleSystem(w http.ResponseWriter, r *http.Request) {
 func (a *App) styleCardPageData(current *neturl.URL, flash *views.FlashMessage) (views.StyleCardListPageData, error) {
 	sortKey, order := services.NormalizeStyleCardSort(current.Query().Get("sort"), current.Query().Get("order"))
 	page := parsePositiveInt(current.Query().Get("page"), 1)
-	pageSize := parsePositiveInt(current.Query().Get("page_size"), 20)
+	pageSize := listPageSize(current.Query().Get("page_size"))
 	filter := services.StyleCardFilter{
 		GroupID:  parseInt64(current.Query().Get("group_id")),
 		Status:   strings.TrimSpace(current.Query().Get("status")),
@@ -398,7 +400,7 @@ func (a *App) styleCardPageData(current *neturl.URL, flash *views.FlashMessage) 
 func (a *App) jargonPageData(current *neturl.URL, flash *views.FlashMessage) (views.JargonListPageData, error) {
 	sortKey, order := services.NormalizeJargonSort(current.Query().Get("sort"), current.Query().Get("order"))
 	page := parsePositiveInt(current.Query().Get("page"), 1)
-	pageSize := parsePositiveInt(current.Query().Get("page_size"), 20)
+	pageSize := listPageSize(current.Query().Get("page_size"))
 	filter := services.JargonFilter{
 		GroupID:  parseInt64(current.Query().Get("group_id")),
 		Status:   strings.TrimSpace(current.Query().Get("status")),
@@ -428,7 +430,7 @@ func (a *App) jargonPageData(current *neturl.URL, flash *views.FlashMessage) (vi
 func (a *App) stickerPageData(current *neturl.URL, flash *views.FlashMessage) (views.StickerListPageData, error) {
 	sortKey, order := services.NormalizeStickerSort(current.Query().Get("sort"), current.Query().Get("order"))
 	page := parsePositiveInt(current.Query().Get("page"), 1)
-	pageSize := parsePositiveInt(current.Query().Get("page_size"), 20)
+	pageSize := listPageSize(current.Query().Get("page_size"))
 	filter := services.StickerFilter{
 		Keyword:  strings.TrimSpace(current.Query().Get("keyword")),
 		Sort:     sortKey,
@@ -454,7 +456,7 @@ func (a *App) stickerPageData(current *neturl.URL, flash *views.FlashMessage) (v
 func (a *App) memoryPageData(current *neturl.URL, flash *views.FlashMessage) (views.MemoryListPageData, error) {
 	sortKey, order := services.NormalizeMemorySort(current.Query().Get("sort"), current.Query().Get("order"))
 	page := parsePositiveInt(current.Query().Get("page"), 1)
-	pageSize := parsePositiveInt(current.Query().Get("page_size"), 20)
+	pageSize := listPageSize(current.Query().Get("page_size"))
 	filter := services.MemoryFilter{
 		GroupID:  parseInt64(current.Query().Get("group_id")),
 		Type:     strings.TrimSpace(current.Query().Get("type")),
@@ -787,72 +789,94 @@ func (a *App) systemSections() []views.SystemSection {
 	groupSummary := "无"
 	if len(groupIDs) > 0 {
 		groupSummary = strings.Join(groupIDs, "、")
+	} else {
+		groupSummary = "暂未启用群聊"
 	}
 
-	return []views.SystemSection{
-		{
-			Title: "人格设定",
-			Fields: []views.SystemField{
-				{Label: "名称", Value: emptyDash(cfg.Persona.Name)},
-				{Label: "QQ", Value: fmt.Sprintf("%d", cfg.Persona.QQ)},
-				{Label: "别名", Value: joinOrDash(cfg.Persona.AliasNames)},
-				{Label: "说话风格", Value: formatSpeakingStyle(cfg.Persona.SpeakingStyle)},
-			},
-		},
-		{
-			Title: "启用群聊",
-			Fields: []views.SystemField{
-				{Label: "总群数", Value: fmt.Sprintf("%d", len(cfg.Groups))},
-				{Label: "启用群数", Value: fmt.Sprintf("%d", countEnabledGroups(cfg.Groups))},
-				{Label: "已启用群聊", Value: groupSummary},
-			},
-		},
-		{
-			Title: "行为与学习",
-			Fields: []views.SystemField{
-				{Label: "观察窗口", Value: fmt.Sprintf("%d 秒", cfg.Agent.ObserveWindow)},
-				{Label: "思考间隔", Value: fmt.Sprintf("%d 秒", cfg.Agent.ThinkInterval)},
-				{Label: "学习启用", Value: yesNoText(cfg.Learning.Enabled)},
-				{Label: "学习批大小", Value: fmt.Sprintf("%d", cfg.Learning.BatchSize)},
-			},
-		},
-		{
-			Title: "能力概览",
-			Fields: []views.SystemField{
-				{Label: "对话回复", Value: requiredCapabilityText(cfg.LLM.Model)},
-				{Label: "辅助判断", Value: optionalCapabilityText(false, cfg.AuxiliaryModel.Model)},
-				{Label: "记忆检索", Value: optionalCapabilityText(cfg.Embedding.Enabled, cfg.Embedding.Model)},
-				{Label: "图片理解", Value: optionalCapabilityText(cfg.VisionLLM.Enabled, cfg.VisionLLM.Model)},
-			},
-		},
-		{
-			Title: "连接状态",
-			Fields: []views.SystemField{
-				{Label: "消息接入", Value: serviceLocationText(cfg.OneBot.WsURL)},
-				{Label: "访问保护", Value: configuredText(cfg.OneBot.AccessToken)},
-				{Label: "连接状态", Value: connectionText(snapshot.Connected)},
-				{Label: "机器人 QQ", Value: fmt.Sprintf("%d", snapshot.SelfID)},
-			},
-		},
-		{
-			Title: "数据状态",
-			Fields: []views.SystemField{
-				{Label: "数据存储", Value: dataServiceText(cfg.Memory.MySQL.Host, cfg.Memory.MySQL.DBName)},
-				{Label: "访问保护", Value: configuredText(cfg.Memory.MySQL.Password)},
-				{Label: "检索能力", Value: vectorServiceText(cfg.Memory.Milvus.Address, cfg.Memory.Milvus.CollectionName)},
-				{Label: "准备状态", Value: collectionReadyText(cfg.Memory.Milvus.CollectionName)},
-			},
-		},
-		{
-			Title: "登录与扩展",
-			Fields: []views.SystemField{
-				{Label: "登录方式", Value: "密码登录"},
-				{Label: "登录保护", Value: configuredText(cfg.Web.AdminKey)},
-				{Label: "扩展工具", Value: fmt.Sprintf("%d 个", snapshot.MCPToolCount)},
-				{Label: "扩展状态", Value: extensionStatusText(snapshot.MCPToolCount)},
-			},
-		},
+	appendField := func(fields []views.SystemField, label string, value string) []views.SystemField {
+		value = strings.TrimSpace(value)
+		if value == "" || value == "-" {
+			return fields
+		}
+		return append(fields, views.SystemField{Label: label, Value: value})
 	}
+
+	personaFields := make([]views.SystemField, 0, 5)
+	personaFields = appendField(personaFields, "名称", emptyDash(cfg.Persona.Name))
+	if cfg.Persona.QQ > 0 {
+		personaFields = append(personaFields, views.SystemField{Label: "QQ", Value: fmt.Sprintf("%d", cfg.Persona.QQ)})
+	}
+	personaFields = appendField(personaFields, "别名", joinOrDash(cfg.Persona.AliasNames))
+	personaFields = appendField(personaFields, "人格简介", strings.TrimSpace(cfg.Persona.Personality))
+	personaFields = appendField(personaFields, "说话风格", formatSpeakingStyle(cfg.Persona.SpeakingStyle))
+
+	groupFields := []views.SystemField{
+		{Label: "启用群数", Value: fmt.Sprintf("%d / %d", countEnabledGroups(cfg.Groups), len(cfg.Groups))},
+		{Label: "已启用群聊", Value: groupSummary},
+		{Label: "观察窗口", Value: fmt.Sprintf("%d 秒", cfg.Agent.ObserveWindow)},
+		{Label: "思考间隔", Value: fmt.Sprintf("%d 秒", cfg.Agent.ThinkInterval)},
+	}
+	if cfg.Agent.ThinkDebounceMS > 0 {
+		groupFields = append(groupFields, views.SystemField{Label: "聚合窗口", Value: fmt.Sprintf("%d 毫秒", cfg.Agent.ThinkDebounceMS)})
+	}
+	if cfg.Learning.Enabled {
+		groupFields = append(groupFields, views.SystemField{Label: "自动学习", Value: fmt.Sprintf("每 %d 分钟整理 %d 条消息", cfg.Learning.IntervalMinutes, cfg.Learning.BatchSize)})
+		if cfg.Learning.ReviewIntervalMinutes > 0 {
+			groupFields = append(groupFields, views.SystemField{Label: "审核节奏", Value: fmt.Sprintf("每 %d 分钟整理一次待审内容", cfg.Learning.ReviewIntervalMinutes)})
+		}
+	}
+
+	modelFields := make([]views.SystemField, 0, 5)
+	modelFields = appendField(modelFields, "对话回复", cfg.LLM.Model)
+	modelFields = appendField(modelFields, "辅助判断", cfg.AuxiliaryModel.Model)
+	if cfg.Embedding.Enabled {
+		modelFields = appendField(modelFields, "记忆检索", cfg.Embedding.Model)
+	}
+	if cfg.VisionLLM.Enabled {
+		modelFields = appendField(modelFields, "图片理解", cfg.VisionLLM.Model)
+	}
+	if snapshot.MCPToolCount > 0 {
+		modelFields = append(modelFields, views.SystemField{Label: "扩展工具", Value: fmt.Sprintf("%d 个", snapshot.MCPToolCount)})
+	}
+
+	runtimeFields := []views.SystemField{
+		{Label: "当前连接", Value: connectionText(snapshot.Connected)},
+		{Label: "重连间隔", Value: fmt.Sprintf("%d 秒", cfg.OneBot.ReconnectInterval)},
+	}
+	if snapshot.SelfID > 0 {
+		runtimeFields = append(runtimeFields, views.SystemField{Label: "机器人 QQ", Value: fmt.Sprintf("%d", snapshot.SelfID)})
+	}
+	if strings.TrimSpace(cfg.Memory.MySQL.Host) != "" {
+		runtimeFields = append(runtimeFields, views.SystemField{Label: "记忆存储", Value: "MySQL"})
+	}
+	if strings.TrimSpace(cfg.Memory.Milvus.Address) != "" {
+		runtimeFields = append(runtimeFields, views.SystemField{Label: "向量检索", Value: "Milvus"})
+	}
+	if cfg.Memory.Milvus.VectorDim > 0 {
+		runtimeFields = append(runtimeFields, views.SystemField{Label: "向量维度", Value: fmt.Sprintf("%d", cfg.Memory.Milvus.VectorDim)})
+	}
+	runtimeFields = appendField(runtimeFields, "相似度算法", strings.ToUpper(strings.TrimSpace(cfg.Memory.Milvus.MetricType)))
+	if cfg.Sticker.MaxSizeMB > 0 {
+		runtimeFields = append(runtimeFields, views.SystemField{Label: "表情包大小上限", Value: fmt.Sprintf("%d MB", cfg.Sticker.MaxSizeMB)})
+	}
+	if cfg.Sticker.AutoSave {
+		runtimeFields = append(runtimeFields, views.SystemField{Label: "表情包收集", Value: "自动保存"})
+	}
+
+	sections := make([]views.SystemSection, 0, 4)
+	if len(personaFields) > 0 {
+		sections = append(sections, views.SystemSection{Title: "人格设定", Fields: personaFields})
+	}
+	if len(groupFields) > 0 {
+		sections = append(sections, views.SystemSection{Title: "群聊与学习", Fields: groupFields})
+	}
+	if len(modelFields) > 0 {
+		sections = append(sections, views.SystemSection{Title: "模型能力", Fields: modelFields})
+	}
+	if len(runtimeFields) > 0 {
+		sections = append(sections, views.SystemSection{Title: "连接与数据", Fields: runtimeFields})
+	}
+	return sections
 }
 
 func isSafeAdminTarget(target *neturl.URL) bool {
@@ -930,6 +954,10 @@ func parsePositiveInt(raw string, fallback int) int {
 	return value
 }
 
+func listPageSize(raw string) int {
+	return parsePositiveInt(raw, defaultListPageSize)
+}
+
 func parseInt64(raw string) int64 {
 	value, _ := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
 	return value
@@ -950,13 +978,6 @@ func countEnabledGroups(groups []config.GroupConfig) int {
 	return total
 }
 
-func configuredText(value string) string {
-	if strings.TrimSpace(value) == "" {
-		return "未设置"
-	}
-	return "已设置"
-}
-
 func joinOrDash(values []string) string {
 	if len(values) == 0 {
 		return "-"
@@ -971,70 +992,11 @@ func emptyDash(value string) string {
 	return value
 }
 
-func yesNoText(value bool) string {
-	if value {
-		return "是"
-	}
-	return "否"
-}
-
 func connectionText(value bool) string {
 	if value {
 		return "已连接"
 	}
 	return "未连接"
-}
-
-func extensionStatusText(count int) string {
-	if count > 0 {
-		return "可用"
-	}
-	return "未接入"
-}
-
-func requiredCapabilityText(value string) string {
-	if strings.TrimSpace(value) == "" {
-		return "未接入"
-	}
-	return "已接入"
-}
-
-func optionalCapabilityText(enabled bool, value string) string {
-	if strings.TrimSpace(value) == "" {
-		if enabled {
-			return "未接入"
-		}
-		return "未启用"
-	}
-	return "已接入"
-}
-
-func serviceLocationText(raw string) string {
-	if strings.TrimSpace(raw) == "" {
-		return "未接入"
-	}
-	return "已接入"
-}
-
-func dataServiceText(host string, dbName string) string {
-	if strings.TrimSpace(host) == "" || strings.TrimSpace(dbName) == "" {
-		return "未接入"
-	}
-	return "已接入"
-}
-
-func vectorServiceText(address string, collection string) string {
-	if strings.TrimSpace(address) == "" || strings.TrimSpace(collection) == "" {
-		return "未接入"
-	}
-	return "已接入"
-}
-
-func collectionReadyText(value string) string {
-	if strings.TrimSpace(value) == "" {
-		return "未就绪"
-	}
-	return "已就绪"
 }
 
 func styleCardActionErrorText(err error) string {
