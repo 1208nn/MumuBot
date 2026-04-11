@@ -709,28 +709,17 @@ func (a *App) dialogReturnTo(r *http.Request, fallback string) string {
 	}
 
 	for _, candidate := range candidates {
-		if candidate == "" {
-			continue
+		if target, ok := normalizeAdminTarget(candidate, r.Host); ok {
+			return target.String()
 		}
-		parsed, err := neturl.Parse(candidate)
-		if err != nil {
-			continue
-		}
-		if parsed.Path == "" {
-			continue
-		}
-		if !isSafeAdminTarget(parsed) {
-			continue
-		}
-		return (&neturl.URL{Path: parsed.Path, RawQuery: parsed.RawQuery}).String()
 	}
 
 	return fallback
 }
 
 func (a *App) actionTargetURL(r *http.Request, fallback string) *neturl.URL {
-	fallbackURL, err := neturl.Parse(strings.TrimSpace(fallback))
-	if err != nil || fallbackURL.Path == "" {
+	fallbackURL, ok := normalizeAdminTarget(fallback, r.Host)
+	if !ok {
 		fallbackURL = &neturl.URL{Path: "/admin"}
 	}
 
@@ -741,20 +730,9 @@ func (a *App) actionTargetURL(r *http.Request, fallback string) *neturl.URL {
 	}
 
 	for _, candidate := range candidates {
-		if candidate == "" {
-			continue
+		if target, ok := normalizeAdminTarget(candidate, r.Host); ok {
+			return target
 		}
-		parsed, err := neturl.Parse(candidate)
-		if err != nil {
-			continue
-		}
-		if parsed.Path == "" {
-			parsed.Path = fallbackURL.Path
-		}
-		if !isSafeAdminTarget(parsed) {
-			continue
-		}
-		return &neturl.URL{Path: parsed.Path, RawQuery: parsed.RawQuery}
 	}
 
 	return &neturl.URL{Path: fallbackURL.Path, RawQuery: fallbackURL.RawQuery}
@@ -960,6 +938,33 @@ func isSafeAdminTarget(target *neturl.URL) bool {
 		return false
 	}
 	return strings.HasPrefix(cleanPath, "/admin")
+}
+
+func normalizeAdminTarget(raw string, requestHost string) (*neturl.URL, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, false
+	}
+
+	target, err := neturl.Parse(raw)
+	if err != nil || target.Path == "" {
+		return nil, false
+	}
+
+	if target.IsAbs() || strings.TrimSpace(target.Host) != "" {
+		if !strings.EqualFold(strings.TrimSpace(target.Host), strings.TrimSpace(requestHost)) {
+			return nil, false
+		}
+		if target.Scheme != "" && target.Scheme != "http" && target.Scheme != "https" {
+			return nil, false
+		}
+	}
+
+	normalized := &neturl.URL{Path: target.Path, RawQuery: target.RawQuery}
+	if !isSafeAdminTarget(normalized) {
+		return nil, false
+	}
+	return normalized, true
 }
 
 func withPage(current *neturl.URL, page int) string {

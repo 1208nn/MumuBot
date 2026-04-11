@@ -1,16 +1,13 @@
 import htmx from "htmx.org";
 import Alpine from "alpinejs";
-import persist from "@alpinejs/persist";
 import { HSOverlay, HSStaticMethods } from "preline";
 import Toastify from "toastify-js";
 
 window.htmx = htmx;
-Alpine.plugin(persist);
 window.Alpine = Alpine;
 
 const DEFAULT_TOAST_DELAY = 4200;
 const REDUCED_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)");
-const ADMIN_SIDEBAR_STORAGE_KEY = "mumu-admin-sidebar-collapsed";
 
 function initAdminInteractions() {
   if (HSStaticMethods && typeof HSStaticMethods.autoInit === "function") {
@@ -255,12 +252,6 @@ function extractToastDetail(event) {
   }
   return null;
 }
-
-document.addEventListener("alpine:init", () => {
-  Alpine.data("adminShell", () => ({
-    sidebarCollapsed: Alpine.$persist(false).as(ADMIN_SIDEBAR_STORAGE_KEY),
-  }));
-});
 
 function bootAdminPage() {
   initAdminInteractions();
