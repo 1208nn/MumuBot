@@ -14,22 +14,23 @@ var (
 
 // Config 全局配置结构
 type Config struct {
-	App            AppConfig       `yaml:"app"`
-	Persona        PersonaConfig   `yaml:"persona"`
-	OneBot         OneBotConfig    `yaml:"onebot"`
-	Groups         []GroupConfig   `yaml:"groups"`
-	Agent          AgentConfig     `yaml:"agent"`
-	Chat           ChatConfig      `yaml:"chat"`     // 聊天行为配置
-	Learning       LearningConfig  `yaml:"learning"` // 学习系统配置
-	LLM            LLMConfig       `yaml:"llm"`
-	AuxiliaryModel AuxLLMConfig    `yaml:"auxiliary_model"` // 辅助模型配置
-	Embedding      EmbeddingConfig `yaml:"embedding"`
-	VisionLLM      VisionLLMConfig `yaml:"vision_llm"`
-	Memory         MemoryConfig    `yaml:"memory"`
-	Sticker        StickerConfig   `yaml:"sticker"` // 表情包配置
-	Server         ServerConfig    `yaml:"server"`
-	Web            WebConfig       `yaml:"web"`
-	Debug          DebugConfig     `yaml:"debug"` // 调试配置
+	App                      AppConfig       `yaml:"app"`
+	Persona                  PersonaConfig   `yaml:"persona"`
+	OneBot                   OneBotConfig    `yaml:"onebot"`
+	Groups                   []GroupConfig   `yaml:"groups"`
+	Agent                    AgentConfig     `yaml:"agent"`
+	Chat                     ChatConfig      `yaml:"chat"`     // 聊天行为配置
+	Learning                 LearningConfig  `yaml:"learning"` // 学习系统配置
+	LLM                      LLMConfig       `yaml:"llm"`
+	AuxiliaryModel           AuxLLMConfig    `yaml:"auxiliary_model"` // 辅助模型配置
+	StyleClassificationModel AuxLLMConfig    `yaml:"style_classification_model"`
+	Embedding                EmbeddingConfig `yaml:"embedding"`
+	VisionLLM                VisionLLMConfig `yaml:"vision_llm"`
+	Memory                   MemoryConfig    `yaml:"memory"`
+	Sticker                  StickerConfig   `yaml:"sticker"` // 表情包配置
+	Server                   ServerConfig    `yaml:"server"`
+	Web                      WebConfig       `yaml:"web"`
+	Debug                    DebugConfig     `yaml:"debug"` // 调试配置
 }
 
 // AppConfig 应用基础配置
@@ -125,7 +126,6 @@ type AuxLLMConfig struct {
 
 // EmbeddingConfig Embedding 模型配置
 type EmbeddingConfig struct {
-	Enabled bool   `yaml:"enabled"`
 	APIKey  string `yaml:"api_key"`
 	BaseURL string `yaml:"base_url"`
 	Model   string `yaml:"model"`
@@ -217,24 +217,17 @@ func Load(path string) (*Config, error) {
 		if apiKey := os.Getenv("MUMU_LLM_API_KEY"); apiKey != "" {
 			cfg.LLM.APIKey = apiKey
 		}
-		// Auxiliary Model API Key
 		if apiKey := os.Getenv("MUMU_AUX_LLM_API_KEY"); apiKey != "" {
 			cfg.AuxiliaryModel.APIKey = apiKey
-		} else if cfg.AuxiliaryModel.APIKey == "" && cfg.LLM.APIKey != "" {
-			// 如果没配辅助模型Key，且没设置专用环境变量，尝试复用主模型的Key
-			cfg.AuxiliaryModel.APIKey = cfg.LLM.APIKey
 		}
-
-		// Embedding API Key：优先使用专用环境变量，否则使用 LLM 的
+		if apiKey := os.Getenv("MUMU_STYLE_CLASSIFICATION_API_KEY"); apiKey != "" {
+			cfg.StyleClassificationModel.APIKey = apiKey
+		}
 		if apiKey := os.Getenv("MUMU_EMBEDDING_API_KEY"); apiKey != "" {
 			cfg.Embedding.APIKey = apiKey
-		} else if cfg.Embedding.APIKey == "" && cfg.LLM.APIKey != "" {
-			cfg.Embedding.APIKey = cfg.LLM.APIKey
 		}
 		if apiKey := os.Getenv("MUMU_VISION_API_KEY"); apiKey != "" {
 			cfg.VisionLLM.APIKey = apiKey
-		} else if cfg.VisionLLM.APIKey == "" && cfg.LLM.APIKey != "" {
-			cfg.VisionLLM.APIKey = cfg.LLM.APIKey
 		}
 		if token := os.Getenv("MUMU_ONEBOT_TOKEN"); token != "" {
 			cfg.OneBot.AccessToken = token

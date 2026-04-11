@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"mumu-bot/internal/config"
 	"mumu-bot/internal/memory"
@@ -108,11 +109,10 @@ func (a *App) routes() http.Handler {
 		protected.Get("/admin/memories", a.handleMemories)
 		protected.Get("/admin/members", a.handleMembers)
 		protected.Get("/admin/system", a.handleSystem)
+		protected.Get("/admin/dialogs/actions", a.handleActionDialogFragment)
+		protected.Get("/admin/dialogs/stickers/{id}", a.handleStickerPreviewDialogFragment)
 
-		protected.Post("/admin/actions/style-cards/{id}/status", a.handleStyleCardStatusUpdate)
-		protected.Post("/admin/actions/jargons/{id}/status", a.handleJargonStatusUpdate)
-		protected.Post("/admin/actions/stickers/{id}/delete", a.handleStickerDelete)
-		protected.Post("/admin/actions/memories/{id}/delete", a.handleMemoryDelete)
+		protected.Post("/admin/actions", a.handleAdminAction)
 	})
 
 	return r
@@ -367,6 +367,76 @@ func (a *App) handleSystem(w http.ResponseWriter, r *http.Request) {
 	}, r.URL.Path))
 }
 
+func (a *App) handleActionDialogFragment(w http.ResponseWriter, r *http.Request) {
+	id, err := parseUintParam(r.URL.Query().Get("action_id"))
+	if err != nil {
+		a.renderStatus(w, http.StatusOK, views.DialogErrorContent("admin-action-dialog", "操作无法继续", "记录编号无效，请刷新列表后再试。"))
+		return
+	}
+
+	kind := strings.TrimSpace(r.URL.Query().Get("action_kind"))
+	returnTo := a.dialogReturnTo(r, "/admin")
+
+	switch kind {
+	case "style-card-status":
+		item, err := a.admin.GetStyleCard(id)
+		if err != nil {
+			a.renderStatus(w, http.StatusOK, views.DialogErrorContent("admin-action-dialog", "风格卡片无法加载", "这条记录可能已经被处理。"))
+			return
+		}
+		data, ok := views.StyleCardActionDialogData(item, r.URL.Query().Get("status"), returnTo)
+		if !ok {
+			a.renderStatus(w, http.StatusOK, views.DialogErrorContent("admin-action-dialog", "操作无法继续", "当前状态下不能执行这次操作。"))
+			return
+		}
+		a.render(w, views.AdminActionDialogContent(data))
+	case "jargon-status":
+		item, err := a.admin.GetJargon(id)
+		if err != nil {
+			a.renderStatus(w, http.StatusOK, views.DialogErrorContent("admin-action-dialog", "黑话记录无法加载", "这条记录可能已经被处理。"))
+			return
+		}
+		data, ok := views.JargonActionDialogData(item, r.URL.Query().Get("status"), returnTo)
+		if !ok {
+			a.renderStatus(w, http.StatusOK, views.DialogErrorContent("admin-action-dialog", "操作无法继续", "当前状态下不能执行这次操作。"))
+			return
+		}
+		a.render(w, views.AdminActionDialogContent(data))
+	case "sticker-delete":
+		item, err := a.admin.GetSticker(id)
+		if err != nil {
+			a.renderStatus(w, http.StatusOK, views.DialogErrorContent("admin-action-dialog", "表情包无法加载", "这张图片可能已经被删除。"))
+			return
+		}
+		a.render(w, views.AdminActionDialogContent(views.StickerDeleteDialogData(item, returnTo)))
+	case "memory-delete":
+		item, err := a.admin.GetMemory(id)
+		if err != nil {
+			a.renderStatus(w, http.StatusOK, views.DialogErrorContent("admin-action-dialog", "记忆无法加载", "这条记忆可能已经被删除。"))
+			return
+		}
+		a.render(w, views.AdminActionDialogContent(views.MemoryDeleteDialogData(item, returnTo)))
+	default:
+		a.renderStatus(w, http.StatusOK, views.DialogErrorContent("admin-action-dialog", "操作无法继续", "未识别这次操作。"))
+	}
+}
+
+func (a *App) handleStickerPreviewDialogFragment(w http.ResponseWriter, r *http.Request) {
+	id, err := parseUintParam(chi.URLParam(r, "id"))
+	if err != nil {
+		a.renderStatus(w, http.StatusOK, views.DialogErrorContent("admin-sticker-preview-dialog", "预览无法加载", "图片编号无效，请刷新列表后再试。"))
+		return
+	}
+
+	item, err := a.admin.GetSticker(id)
+	if err != nil {
+		a.renderStatus(w, http.StatusOK, views.DialogErrorContent("admin-sticker-preview-dialog", "预览无法加载", "这张图片可能已经被删除。"))
+		return
+	}
+
+	a.render(w, views.StickerPreviewDialog(views.StickerPreviewDialogDataForItem(item)))
+}
+
 func (a *App) styleCardPageData(current *neturl.URL, flash *views.FlashMessage) (views.StyleCardListPageData, error) {
 	sortKey, order := services.NormalizeStyleCardSort(current.Query().Get("sort"), current.Query().Get("order"))
 	page := parsePositiveInt(current.Query().Get("page"), 1)
@@ -483,117 +553,59 @@ func (a *App) memoryPageData(current *neturl.URL, flash *views.FlashMessage) (vi
 	}, nil
 }
 
-func (a *App) handleStyleCardStatusUpdate(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleAdminAction(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "风格卡片状态更新失败", Body: "请求格式不正确。"})
+		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "操作失败", Body: "请求格式不正确。"})
 		return
 	}
 
-	id, err := parseUintParam(chi.URLParam(r, "id"))
+	id, err := parseUintParam(r.FormValue("action_id"))
 	if err != nil {
-		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "风格卡片状态更新失败", Body: "记录编号无效。"})
+		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "操作失败", Body: "记录编号无效。"})
 		return
 	}
 
-	if err := a.admin.UpdateStyleCardStatus(id, r.FormValue("status")); err != nil {
-		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "风格卡片状态更新失败", Body: styleCardActionErrorText(err)})
-		return
-	}
+	var (
+		fallback string
+		flash    *views.FlashMessage
+	)
 
-	if err := a.respondActionSuccess(w, r, "/admin/style-cards", &views.FlashMessage{
-		Kind:  "success",
-		Title: "风格卡片状态已更新",
-	}, func(current *neturl.URL) (templ.Component, error) {
-		data, err := a.styleCardPageData(current, nil)
-		if err != nil {
-			return nil, err
+	switch strings.TrimSpace(r.FormValue("action_kind")) {
+	case "style-card-status":
+		if err := a.admin.UpdateStyleCardStatus(id, r.FormValue("status")); err != nil {
+			a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "风格卡片状态更新失败", Body: styleCardActionErrorText(err)})
+			return
 		}
-		return views.PageContent(views.StyleCardListBody(data)), nil
-	}); err != nil {
-		a.respondActionError(w, r, http.StatusInternalServerError, &views.FlashMessage{Kind: "error", Title: "风格卡片状态更新失败", Body: "列表刷新失败，请稍后再试。"})
-	}
-}
-
-func (a *App) handleJargonStatusUpdate(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "黑话状态更新失败", Body: "请求格式不正确。"})
-		return
-	}
-
-	id, err := parseUintParam(chi.URLParam(r, "id"))
-	if err != nil {
-		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "黑话状态更新失败", Body: "记录编号无效。"})
-		return
-	}
-
-	if err := a.admin.UpdateJargonStatus(id, r.FormValue("status")); err != nil {
-		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "黑话状态更新失败", Body: jargonActionErrorText(err)})
-		return
-	}
-
-	if err := a.respondActionSuccess(w, r, "/admin/jargons", &views.FlashMessage{
-		Kind:  "success",
-		Title: "黑话状态已更新",
-	}, func(current *neturl.URL) (templ.Component, error) {
-		data, err := a.jargonPageData(current, nil)
-		if err != nil {
-			return nil, err
+		fallback = "/admin/style-cards"
+		flash = &views.FlashMessage{Kind: "success", Title: "风格卡片状态已更新"}
+	case "jargon-status":
+		if err := a.admin.UpdateJargonStatus(id, r.FormValue("status")); err != nil {
+			a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "黑话状态更新失败", Body: jargonActionErrorText(err)})
+			return
 		}
-		return views.PageContent(views.JargonListBody(data)), nil
-	}); err != nil {
-		a.respondActionError(w, r, http.StatusInternalServerError, &views.FlashMessage{Kind: "error", Title: "黑话状态更新失败", Body: "列表刷新失败，请稍后再试。"})
-	}
-}
-
-func (a *App) handleStickerDelete(w http.ResponseWriter, r *http.Request) {
-	id, err := parseUintParam(chi.URLParam(r, "id"))
-	if err != nil {
-		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "表情包删除失败", Body: "记录编号无效。"})
-		return
-	}
-
-	if err := a.admin.DeleteSticker(id); err != nil {
-		a.respondActionError(w, r, http.StatusInternalServerError, &views.FlashMessage{Kind: "error", Title: "表情包删除失败", Body: deleteActionErrorText(err)})
-		return
-	}
-
-	if err := a.respondActionSuccess(w, r, "/admin/stickers", &views.FlashMessage{
-		Kind:  "success",
-		Title: "表情包已删除",
-	}, func(current *neturl.URL) (templ.Component, error) {
-		data, err := a.stickerPageData(current, nil)
-		if err != nil {
-			return nil, err
+		fallback = "/admin/jargons"
+		flash = &views.FlashMessage{Kind: "success", Title: "黑话状态已更新"}
+	case "sticker-delete":
+		if err := a.admin.DeleteSticker(id); err != nil {
+			a.respondActionError(w, r, http.StatusInternalServerError, &views.FlashMessage{Kind: "error", Title: "表情包删除失败", Body: deleteActionErrorText(err)})
+			return
 		}
-		return views.PageContent(views.StickerListBody(data)), nil
-	}); err != nil {
-		a.respondActionError(w, r, http.StatusInternalServerError, &views.FlashMessage{Kind: "error", Title: "表情包删除失败", Body: "列表刷新失败，请稍后再试。"})
-	}
-}
-
-func (a *App) handleMemoryDelete(w http.ResponseWriter, r *http.Request) {
-	id, err := parseUintParam(chi.URLParam(r, "id"))
-	if err != nil {
-		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "记忆删除失败", Body: "记录编号无效。"})
-		return
-	}
-
-	if err := a.admin.DeleteMemory(id); err != nil {
-		a.respondActionError(w, r, http.StatusInternalServerError, &views.FlashMessage{Kind: "error", Title: "记忆删除失败", Body: deleteActionErrorText(err)})
-		return
-	}
-
-	if err := a.respondActionSuccess(w, r, "/admin/memories", &views.FlashMessage{
-		Kind:  "success",
-		Title: "记忆已删除",
-	}, func(current *neturl.URL) (templ.Component, error) {
-		data, err := a.memoryPageData(current, nil)
-		if err != nil {
-			return nil, err
+		fallback = "/admin/stickers"
+		flash = &views.FlashMessage{Kind: "success", Title: "表情包已删除"}
+	case "memory-delete":
+		if err := a.admin.DeleteMemory(id); err != nil {
+			a.respondActionError(w, r, http.StatusInternalServerError, &views.FlashMessage{Kind: "error", Title: "记忆删除失败", Body: deleteActionErrorText(err)})
+			return
 		}
-		return views.PageContent(views.MemoryListBody(data)), nil
-	}); err != nil {
-		a.respondActionError(w, r, http.StatusInternalServerError, &views.FlashMessage{Kind: "error", Title: "记忆删除失败", Body: "列表刷新失败，请稍后再试。"})
+		fallback = "/admin/memories"
+		flash = &views.FlashMessage{Kind: "success", Title: "记忆已删除"}
+	default:
+		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "操作失败", Body: "未识别这次操作。"})
+		return
+	}
+
+	if err := a.respondActionSuccess(w, r, fallback, flash, a.renderActionTarget); err != nil {
+		a.respondActionError(w, r, http.StatusInternalServerError, &views.FlashMessage{Kind: "error", Title: "操作失败", Body: "列表刷新失败，请稍后再试。"})
 	}
 }
 
@@ -689,6 +701,33 @@ func isHTMXRequest(r *http.Request) bool {
 	return strings.EqualFold(strings.TrimSpace(r.Header.Get("HX-Request")), "true")
 }
 
+func (a *App) dialogReturnTo(r *http.Request, fallback string) string {
+	candidates := []string{
+		strings.TrimSpace(r.Header.Get("HX-Current-URL")),
+		strings.TrimSpace(r.Header.Get("Referer")),
+		strings.TrimSpace(fallback),
+	}
+
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		parsed, err := neturl.Parse(candidate)
+		if err != nil {
+			continue
+		}
+		if parsed.Path == "" {
+			continue
+		}
+		if !isSafeAdminTarget(parsed) {
+			continue
+		}
+		return (&neturl.URL{Path: parsed.Path, RawQuery: parsed.RawQuery}).String()
+	}
+
+	return fallback
+}
+
 func (a *App) actionTargetURL(r *http.Request, fallback string) *neturl.URL {
 	fallbackURL, err := neturl.Parse(strings.TrimSpace(fallback))
 	if err != nil || fallbackURL.Path == "" {
@@ -742,6 +781,37 @@ func (a *App) respondActionSuccess(w http.ResponseWriter, r *http.Request, fallb
 	}
 	a.renderStatus(w, http.StatusOK, component)
 	return nil
+}
+
+func (a *App) renderActionTarget(current *neturl.URL) (templ.Component, error) {
+	switch current.Path {
+	case "/admin/style-cards":
+		data, err := a.styleCardPageData(current, nil)
+		if err != nil {
+			return nil, err
+		}
+		return views.PageContent(views.StyleCardListBody(data)), nil
+	case "/admin/jargons":
+		data, err := a.jargonPageData(current, nil)
+		if err != nil {
+			return nil, err
+		}
+		return views.PageContent(views.JargonListBody(data)), nil
+	case "/admin/stickers":
+		data, err := a.stickerPageData(current, nil)
+		if err != nil {
+			return nil, err
+		}
+		return views.PageContent(views.StickerListBody(data)), nil
+	case "/admin/memories":
+		data, err := a.memoryPageData(current, nil)
+		if err != nil {
+			return nil, err
+		}
+		return views.PageContent(views.MemoryListBody(data)), nil
+	default:
+		return views.PageContent(templ.NopComponent), nil
+	}
 }
 
 func (a *App) respondActionError(w http.ResponseWriter, r *http.Request, status int, flash *views.FlashMessage) {
@@ -826,12 +896,11 @@ func (a *App) systemSections() []views.SystemSection {
 		}
 	}
 
-	modelFields := make([]views.SystemField, 0, 5)
+	modelFields := make([]views.SystemField, 0, 6)
 	modelFields = appendField(modelFields, "对话回复", cfg.LLM.Model)
 	modelFields = appendField(modelFields, "辅助判断", cfg.AuxiliaryModel.Model)
-	if cfg.Embedding.Enabled {
-		modelFields = appendField(modelFields, "记忆检索", cfg.Embedding.Model)
-	}
+	modelFields = appendField(modelFields, "风格判断", cfg.StyleClassificationModel.Model)
+	modelFields = appendField(modelFields, "记忆检索", cfg.Embedding.Model)
 	if cfg.VisionLLM.Enabled {
 		modelFields = appendField(modelFields, "图片理解", cfg.VisionLLM.Model)
 	}
@@ -855,7 +924,7 @@ func (a *App) systemSections() []views.SystemSection {
 	if cfg.Memory.Milvus.VectorDim > 0 {
 		runtimeFields = append(runtimeFields, views.SystemField{Label: "向量维度", Value: fmt.Sprintf("%d", cfg.Memory.Milvus.VectorDim)})
 	}
-	runtimeFields = appendField(runtimeFields, "相似度算法", strings.ToUpper(strings.TrimSpace(cfg.Memory.Milvus.MetricType)))
+	runtimeFields = appendField(runtimeFields, "相似度算法", metricTypeText(cfg.Memory.Milvus.MetricType))
 	if cfg.Sticker.MaxSizeMB > 0 {
 		runtimeFields = append(runtimeFields, views.SystemField{Label: "表情包大小上限", Value: fmt.Sprintf("%d MB", cfg.Sticker.MaxSizeMB)})
 	}
@@ -943,7 +1012,44 @@ func actionTriggerHeader(flash *views.FlashMessage, closeDialog bool) (string, e
 	if err != nil {
 		return "", err
 	}
-	return string(encoded), nil
+	return asciiHeaderJSON(string(encoded)), nil
+}
+
+func asciiHeaderJSON(raw string) string {
+	var builder strings.Builder
+	builder.Grow(len(raw))
+
+	for _, r := range raw {
+		if r <= 127 {
+			builder.WriteRune(r)
+			continue
+		}
+		if r <= 0xFFFF {
+			fmt.Fprintf(&builder, "\\u%04x", r)
+			continue
+		}
+		for _, unit := range utf16.Encode([]rune{r}) {
+			fmt.Fprintf(&builder, "\\u%04x", unit)
+		}
+	}
+
+	return builder.String()
+}
+
+func metricTypeText(raw string) string {
+	switch strings.ToUpper(strings.TrimSpace(raw)) {
+	case "COSINE":
+		return "余弦相似度"
+	case "L2":
+		return "欧氏距离"
+	case "IP":
+		return "内积"
+	default:
+		if strings.TrimSpace(raw) == "" {
+			return ""
+		}
+		return "其他算法"
+	}
 }
 
 func parsePositiveInt(raw string, fallback int) int {

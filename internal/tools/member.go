@@ -13,30 +13,6 @@ import (
 
 // ==================== 更新成员画像工具 ====================
 
-// mergeAndDeduplicateStrings 合并两个字符串切片并去重
-func mergeAndDeduplicateStrings(existing []string, newItems []string) []string {
-	seen := make(map[string]bool)
-	result := make([]string, 0)
-
-	// 先添加已有的
-	for _, item := range existing {
-		if item != "" && !seen[item] {
-			seen[item] = true
-			result = append(result, item)
-		}
-	}
-
-	// 再添加新的
-	for _, item := range newItems {
-		if item != "" && !seen[item] {
-			seen[item] = true
-			result = append(result, item)
-		}
-	}
-
-	return result
-}
-
 // UpdateMemberProfileInput 更新成员画像的输入参数
 type UpdateMemberProfileInput struct {
 	// UserID 群友的QQ号
@@ -44,9 +20,9 @@ type UpdateMemberProfileInput struct {
 	// SpeakStyle 说话风格描述
 	SpeakStyle string `json:"speak_style,omitempty" jsonschema:"description=说话风格描述（覆盖之前的描述）"`
 	// Interests 兴趣爱好列表
-	Interests []string `json:"interests,omitempty" jsonschema:"description=兴趣爱好列表（只传入新增的项）"`
+	Interests []string `json:"interests,omitempty" jsonschema:"description=兴趣爱好列表（传入后会覆盖旧列表）"`
 	// CommonWords 常用词汇或口头禅
-	CommonWords []string `json:"common_words,omitempty" jsonschema:"description=常用词汇或口头禅（只传入新增的项）"`
+	CommonWords []string `json:"common_words,omitempty" jsonschema:"description=常用词汇或口头禅（传入后会覆盖旧列表）"`
 	// IntimacyDelta 亲密度变化值 -0.3 到 0.3
 	IntimacyDelta float64 `json:"intimacy_delta,omitempty" jsonschema:"minimum=-0.3,maximum=0.3,description=亲密度变化值(-0.3到0.3)，正数表示增加亲密度，负数表示降低亲密度"`
 }
@@ -70,36 +46,21 @@ func updateMemberProfileFunc(ctx context.Context, input *UpdateMemberProfileInpu
 
 	profile, err := tc.MemoryMgr.GetMemberProfile(input.UserID)
 	if err != nil {
-		return &UpdateMemberProfileOutput{Success: false, Message: err.Error()}, nil
+		profile, err = tc.MemoryMgr.GetOrCreateMemberProfile(input.UserID, "")
+		if err != nil {
+			return &UpdateMemberProfileOutput{Success: false, Message: err.Error()}, nil
+		}
 	}
 
 	if input.SpeakStyle != "" {
 		profile.SpeakStyle = input.SpeakStyle
 	}
-	if len(input.Interests) > 0 {
-		// 解析已有的兴趣爱好
-		var existingInterests []string
-		if profile.Interests != "" {
-			if err := sonic.UnmarshalString(profile.Interests, &existingInterests); err != nil {
-				existingInterests = []string{}
-			}
-		}
-		// 合并并去重
-		mergedInterests := mergeAndDeduplicateStrings(existingInterests, input.Interests)
-		b, _ := sonic.MarshalString(mergedInterests)
+	if input.Interests != nil {
+		b, _ := sonic.MarshalString(input.Interests)
 		profile.Interests = b
 	}
-	if len(input.CommonWords) > 0 {
-		// 解析已有的常用词汇
-		var existingCommonWords []string
-		if profile.CommonWords != "" {
-			if err := sonic.UnmarshalString(profile.CommonWords, &existingCommonWords); err != nil {
-				existingCommonWords = []string{}
-			}
-		}
-		// 合并并去重
-		mergedCommonWords := mergeAndDeduplicateStrings(existingCommonWords, input.CommonWords)
-		b, _ := sonic.MarshalString(mergedCommonWords)
+	if input.CommonWords != nil {
+		b, _ := sonic.MarshalString(input.CommonWords)
 		profile.CommonWords = b
 	}
 
@@ -117,7 +78,7 @@ func updateMemberProfileFunc(ctx context.Context, input *UpdateMemberProfileInpu
 func NewUpdateMemberProfileTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"updateMemberProfile",
-		"更新你对某个群友的了解。当你发现群友的新特点、说话风格、兴趣爱好时使用。也可以根据互动情况调整亲密度。",
+		"更新你对某个群友的了解。当你发现群友的新特点、说话风格、兴趣爱好时使用。兴趣和常用词列表会按本次结果整体覆盖。也可以根据互动情况调整亲密度。",
 		updateMemberProfileFunc,
 	)
 }

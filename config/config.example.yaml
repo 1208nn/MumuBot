@@ -99,23 +99,28 @@ llm:
 
 # 辅助模型配置（用于后台学习任务，不占用主模型资源）
 auxiliary_model:
-  api_key: ""        # 留空则使用 MUMU_AUX_LLM_API_KEY 或 MUMU_LLM_API_KEY 环境变量
+  api_key: ""        # 留空则使用 MUMU_AUX_LLM_API_KEY 环境变量
   base_url: ""
   model: ""
 
-# Embedding模型配置（用于记忆检索）
+# 风格分类模型配置（强制项，不回退主模型或辅助模型）
+style_classification_model:
+  api_key: ""        # 留空则使用 MUMU_STYLE_CLASSIFICATION_API_KEY 环境变量
+  base_url: ""
+  model: ""
+
+# Embedding模型配置（用于记忆检索，强制项）
 embedding:
-  enabled: true
-  api_key: ""        # 留空则使用 MUMU_EMBEDDING_API_KEY 或 MUMU_LLM_API_KEY 环境变量
+  api_key: ""        # 留空则使用 MUMU_EMBEDDING_API_KEY 环境变量
   base_url: ""
   model: ""
 
 # 多模态视觉模型配置（用于理解图片和表情包）
 vision_llm:
-  enabled: true     # 是否启用图片理解
-  api_key: ""        # 留空则使用 MUMU_VISION_API_KEY 环境变量 或 MUMU_LLM_API_KEY 环境变量
+  enabled: true      # 是否启用图片理解
+  api_key: ""        # 留空则使用 MUMU_VISION_API_KEY 环境变量
   base_url: ""
-  model: ""    # 支持视觉的模型
+  model: ""
 
 # 记忆系统配置
 memory:

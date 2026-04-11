@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
@@ -22,16 +23,15 @@ import (
 )
 
 type Learner struct {
-	memMgr    *memory.Manager
-	jargonMgr *jargon.Manager
-	auxModel  model.ToolCallingChatModel
-	tools     []tool.BaseTool
-	agent     *react.Agent
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	isRunning bool
-	mu        sync.Mutex
+	memMgr             *memory.Manager
+	jargonMgr          *jargon.Manager
+	knowledgeAgent     *react.Agent
+	memberProfileAgent *react.Agent
+	ctx                context.Context
+	cancel             context.CancelFunc
+	wg                 sync.WaitGroup
+	isRunning          bool
+	mu                 sync.Mutex
 }
 
 func New(memMgr *memory.Manager, jargonMgr *jargon.Manager) (*Learner, error) {
@@ -40,8 +40,8 @@ func New(memMgr *memory.Manager, jargonMgr *jargon.Manager) (*Learner, error) {
 		return nil, err
 	}
 
-	var learningTools []tool.BaseTool
-	toolBuilders := []func() (tool.BaseTool, error){
+	var knowledgeTools []tool.BaseTool
+	knowledgeToolBuilders := []func() (tool.BaseTool, error){
 		func() (tool.BaseTool, error) { return tools.NewSaveJargonTool() },
 		func() (tool.BaseTool, error) { return tools.NewSaveStyleCardTool() },
 		func() (tool.BaseTool, error) { return tools.NewGetUncheckedStyleCardsTool() },
@@ -49,24 +49,50 @@ func New(memMgr *memory.Manager, jargonMgr *jargon.Manager) (*Learner, error) {
 		func() (tool.BaseTool, error) { return tools.NewGetUncheckedJargonsTool() },
 		func() (tool.BaseTool, error) { return tools.NewReviewJargonTool() },
 	}
-	for _, build := range toolBuilders {
+	for _, build := range knowledgeToolBuilders {
 		t, err := build()
 		if err != nil {
 			return nil, err
 		}
-		learningTools = append(learningTools, t)
+		knowledgeTools = append(knowledgeTools, t)
 	}
 
-	// Initialize ReAct agent
 	cfg := config.Get()
 	maxStep := cfg.Learning.MaxStep
 	if maxStep <= 0 {
 		maxStep = 10
 	}
-	agent, err := react.NewAgent(context.Background(), &react.AgentConfig{
-		ToolCallingModel: auxModel,
+
+	knowledgeAgent, err := newLearnerAgent(auxModel, knowledgeTools, maxStep)
+	if err != nil {
+		return nil, fmt.Errorf("创建学习 Agent 失败: %w", err)
+	}
+
+	memberProfileTool, err := tools.NewUpdateMemberProfileTool()
+	if err != nil {
+		return nil, err
+	}
+
+	memberProfileAgent, err := newLearnerAgent(auxModel, []tool.BaseTool{memberProfileTool}, maxStep)
+	if err != nil {
+		return nil, fmt.Errorf("创建成员画像学习 Agent 失败: %w", err)
+	}
+
+	l := &Learner{
+		memMgr:             memMgr,
+		jargonMgr:          jargonMgr,
+		knowledgeAgent:     knowledgeAgent,
+		memberProfileAgent: memberProfileAgent,
+	}
+
+	return l, nil
+}
+
+func newLearnerAgent(model model.ToolCallingChatModel, toolset []tool.BaseTool, maxStep int) (*react.Agent, error) {
+	return react.NewAgent(context.Background(), &react.AgentConfig{
+		ToolCallingModel: model,
 		ToolsConfig: compose.ToolsNodeConfig{
-			Tools: learningTools,
+			Tools: toolset,
 			ToolArgumentsHandler: func(ctx context.Context, name, arguments string) (string, error) {
 				return tools.CanonicalizeToolArguments(arguments)
 			},
@@ -76,19 +102,6 @@ func New(memMgr *memory.Manager, jargonMgr *jargon.Manager) (*Learner, error) {
 		},
 		MaxStep: maxStep,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("创建学习 Agent 失败: %w", err)
-	}
-
-	l := &Learner{
-		memMgr:    memMgr,
-		jargonMgr: jargonMgr,
-		auxModel:  auxModel,
-		tools:     learningTools,
-		agent:     agent,
-	}
-
-	return l, nil
 }
 
 func (l *Learner) Start(parent context.Context) {
@@ -219,7 +232,7 @@ func (l *Learner) processReview(groupID int64) {
 	if cfg := config.Get(); cfg != nil && cfg.Debug.ShowToolCalls {
 		opts = append(opts, agentflow.WithComposeOptions(compose.WithCallbacks(tools.NewToolLogHandler())))
 	}
-	_, err := l.agent.Generate(ctx, []*schema.Message{
+	_, err := l.knowledgeAgent.Generate(ctx, []*schema.Message{
 		schema.UserMessage(prompt),
 	}, opts...)
 	if err != nil {
@@ -270,6 +283,27 @@ func (l *Learner) processGroup(groupID int64) {
 		return
 	}
 
+	knowledgeErr := l.processKnowledgeExtraction(groupID, msgs)
+	memberErr := l.processMemberProfileExtraction(groupID, msgs)
+	if knowledgeErr != nil || memberErr != nil {
+		if knowledgeErr != nil {
+			zap.L().Error("后台学习任务失败", zap.Int64("group_id", groupID), zap.Error(knowledgeErr))
+		}
+		if memberErr != nil {
+			zap.L().Error("成员画像学习任务失败", zap.Int64("group_id", groupID), zap.Error(memberErr))
+		}
+		return
+	}
+
+	zap.L().Info("后台学习任务完成", zap.Int64("group_id", groupID))
+
+	// 更新进度
+	if err := l.memMgr.UpdateLearningState(groupID, newLastID); err != nil {
+		zap.L().Error("更新学习进度失败", zap.Int64("group_id", groupID), zap.Error(err))
+	}
+}
+
+func (l *Learner) processKnowledgeExtraction(groupID int64, msgs []memory.MessageLog) error {
 	// 构建提示词
 	var chatLog strings.Builder
 	for _, m := range msgs {
@@ -329,18 +363,143 @@ func (l *Learner) processGroup(groupID int64) {
 	if cfg := config.Get(); cfg != nil && cfg.Debug.ShowToolCalls {
 		opts = append(opts, agentflow.WithComposeOptions(compose.WithCallbacks(tools.NewToolLogHandler())))
 	}
-	_, err = l.agent.Generate(ctx, []*schema.Message{
+	_, err := l.knowledgeAgent.Generate(ctx, []*schema.Message{
 		schema.UserMessage(prompt),
 	}, opts...)
 	if err != nil {
-		zap.L().Error("后台学习任务失败", zap.Int64("group_id", groupID), zap.Error(err))
-		return
+		return err
 	}
 
-	zap.L().Info("后台学习任务完成", zap.Int64("group_id", groupID))
+	return nil
+}
 
-	// 更新进度
-	if err := l.memMgr.UpdateLearningState(groupID, newLastID); err != nil {
-		zap.L().Error("更新学习进度失败", zap.Int64("group_id", groupID), zap.Error(err))
+func (l *Learner) processMemberProfileExtraction(groupID int64, msgs []memory.MessageLog) error {
+	summaries := l.buildMemberProfileSummaries(msgs)
+	if len(summaries) == 0 {
+		return nil
 	}
+
+	prompt := fmt.Sprintf(`请根据下面这些群友在本批消息里的发言证据，提炼成员画像。
+你只能在证据足够时调用 'updateMemberProfile' 工具，不要输出普通文本。
+
+要求：
+1. 只处理发言证据明确、样本足够的群友；没有把握就跳过。
+2. speak_style 用一句中文概括该人的说话习惯。
+3. interests 和 common_words 都要尽量精炼，通常各给 0-5 项即可。
+4. interests 和 common_words 会整体覆盖旧列表，所以不要把不确定的项塞进去。
+5. 不要修改 intimacy_delta，保持默认值。
+6. 如果某个字段没有把握，就不要传该字段。
+7. 如果没有适合更新的人，直接回复“无新发现”。
+
+候选成员：
+
+%s`, strings.Join(summaries, "\n\n"))
+
+	ctx, cancel := context.WithTimeout(l.ctx, 90*time.Second)
+	defer cancel()
+	ctx = tools.WithToolContext(ctx, &tools.ToolContext{
+		GroupID:   groupID,
+		MemoryMgr: l.memMgr,
+	})
+
+	opts := []agentflow.AgentOption{}
+	if cfg := config.Get(); cfg != nil && cfg.Debug.ShowToolCalls {
+		opts = append(opts, agentflow.WithComposeOptions(compose.WithCallbacks(tools.NewToolLogHandler())))
+	}
+	_, err := l.memberProfileAgent.Generate(ctx, []*schema.Message{
+		schema.UserMessage(prompt),
+	}, opts...)
+	return err
+}
+
+func (l *Learner) buildMemberProfileSummaries(msgs []memory.MessageLog) []string {
+	const minEvidenceMessages = 3
+	const maxSamplesPerMember = 6
+
+	type memberEvidence struct {
+		userID   int64
+		nickname string
+		messages []string
+		msgCount int
+	}
+
+	evidenceByUser := make(map[int64]*memberEvidence)
+	order := make([]int64, 0)
+
+	for _, msg := range msgs {
+		if msg.UserID == 0 {
+			continue
+		}
+		content := strings.TrimSpace(msg.OriginalContent)
+		if content == "" {
+			content = strings.TrimSpace(msg.Content)
+		}
+		if content == "" {
+			continue
+		}
+
+		evidence, ok := evidenceByUser[msg.UserID]
+		if !ok {
+			evidence = &memberEvidence{
+				userID:   msg.UserID,
+				nickname: msg.Nickname,
+				messages: make([]string, 0, maxSamplesPerMember),
+			}
+			evidenceByUser[msg.UserID] = evidence
+			order = append(order, msg.UserID)
+		}
+		evidence.msgCount++
+		if evidence.nickname == "" {
+			evidence.nickname = msg.Nickname
+		}
+		if len(evidence.messages) < maxSamplesPerMember {
+			evidence.messages = append(evidence.messages, content)
+		}
+	}
+
+	summaries := make([]string, 0, len(order))
+	for _, userID := range order {
+		evidence := evidenceByUser[userID]
+		if evidence == nil || evidence.msgCount < minEvidenceMessages || len(evidence.messages) < minEvidenceMessages {
+			continue
+		}
+
+		summary := &strings.Builder{}
+		fmt.Fprintf(summary, "用户 %d（%s）最近发言 %d 条。", evidence.userID, evidence.nickname, evidence.msgCount)
+		if profile, err := l.memMgr.GetMemberProfile(userID); err == nil {
+			var profileNotes []string
+			if strings.TrimSpace(profile.SpeakStyle) != "" {
+				profileNotes = append(profileNotes, "当前说话风格："+strings.TrimSpace(profile.SpeakStyle))
+			}
+			if interests := decodeProfileList(profile.Interests); len(interests) > 0 {
+				profileNotes = append(profileNotes, "当前兴趣："+strings.Join(interests, "、"))
+			}
+			if commonWords := decodeProfileList(profile.CommonWords); len(commonWords) > 0 {
+				profileNotes = append(profileNotes, "当前常用词："+strings.Join(commonWords, "、"))
+			}
+			if len(profileNotes) > 0 {
+				fmt.Fprintf(summary, "\n已有画像：%s。", strings.Join(profileNotes, "；"))
+			}
+		}
+		summary.WriteString("\n发言样本：")
+		for idx, content := range evidence.messages {
+			fmt.Fprintf(summary, "\n%d. %s", idx+1, content)
+		}
+		summaries = append(summaries, summary.String())
+	}
+
+	return summaries
+}
+
+func decodeProfileList(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	var items []string
+	if err := sonic.UnmarshalString(raw, &items); err == nil && len(items) > 0 {
+		return items
+	}
+	return []string{raw}
 }

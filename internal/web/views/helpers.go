@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"mumu-bot/internal/memory"
 	neturl "net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -64,77 +65,16 @@ func connectionText(v bool) string {
 	return "未连接"
 }
 
-func flashClass(kind string) string {
-	base := "pointer-events-auto w-full rounded-[1.45rem] border bg-white/96 p-4 text-slate-900 shadow-[0_24px_60px_rgba(8,17,31,0.16)] ring-1 backdrop-blur-xl sm:w-[24rem]"
-	switch strings.TrimSpace(kind) {
-	case "error":
-		return joinClasses(base, "border-rose-200/90 ring-rose-100/80")
-	case "warn":
-		return joinClasses(base, "border-amber-200/90 ring-amber-100/80")
-	default:
-		return joinClasses(base, "border-emerald-200/90 ring-emerald-100/80")
+func flashJSON(flash *FlashMessage) string {
+	if flash == nil {
+		return ""
 	}
-}
 
-func flashIconName(kind string) string {
-	switch strings.TrimSpace(kind) {
-	case "error":
-		return "flash-error"
-	case "warn":
-		return "flash-warn"
-	default:
-		return "flash-success"
-	}
-}
-
-func flashIconClass(kind string) string {
-	base := "inline-flex size-10 shrink-0 items-center justify-center rounded-2xl ring-1"
-	switch strings.TrimSpace(kind) {
-	case "error":
-		return joinClasses(base, "bg-rose-50 text-rose-700 ring-rose-200/80")
-	case "warn":
-		return joinClasses(base, "bg-amber-50 text-amber-700 ring-amber-200/80")
-	default:
-		return joinClasses(base, "bg-emerald-50 text-emerald-700 ring-emerald-200/80")
-	}
-}
-
-func flashCloseButtonClass(kind string) string {
-	base := "inline-flex size-9 shrink-0 items-center justify-center rounded-full text-slate-500 transition duration-200 ease-out hover:bg-slate-950/6 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
-	switch strings.TrimSpace(kind) {
-	case "error":
-		return joinClasses(base, "focus-visible:ring-rose-300")
-	case "warn":
-		return joinClasses(base, "focus-visible:ring-amber-300")
-	default:
-		return joinClasses(base, "focus-visible:ring-emerald-300")
-	}
-}
-
-func adminActionJSON(payload AdminActionPayload) string {
-	data, err := json.Marshal(payload)
+	data, err := json.Marshal(flash)
 	if err != nil {
-		return "{}"
+		return ""
 	}
 	return string(data)
-}
-
-func flashRole(kind string) string {
-	switch strings.TrimSpace(kind) {
-	case "error", "warn":
-		return "alert"
-	default:
-		return "status"
-	}
-}
-
-func flashLive(kind string) string {
-	switch strings.TrimSpace(kind) {
-	case "error", "warn":
-		return "assertive"
-	default:
-		return "polite"
-	}
 }
 
 func navIconName(href string) string {
@@ -423,6 +363,40 @@ func rowActionClass(action RowAction) string {
 	}
 }
 
+func styleCardActionDialogHref(id uint, status string) string {
+	values := neturl.Values{}
+	values.Set("action_kind", "style-card-status")
+	values.Set("action_id", strconv.FormatUint(uint64(id), 10))
+	values.Set("status", strings.TrimSpace(status))
+	return "/admin/dialogs/actions?" + values.Encode()
+}
+
+func jargonActionDialogHref(id uint, status string) string {
+	values := neturl.Values{}
+	values.Set("action_kind", "jargon-status")
+	values.Set("action_id", strconv.FormatUint(uint64(id), 10))
+	values.Set("status", strings.TrimSpace(status))
+	return "/admin/dialogs/actions?" + values.Encode()
+}
+
+func stickerDeleteDialogHref(id uint) string {
+	values := neturl.Values{}
+	values.Set("action_kind", "sticker-delete")
+	values.Set("action_id", strconv.FormatUint(uint64(id), 10))
+	return "/admin/dialogs/actions?" + values.Encode()
+}
+
+func memoryDeleteDialogHref(id uint) string {
+	values := neturl.Values{}
+	values.Set("action_kind", "memory-delete")
+	values.Set("action_id", strconv.FormatUint(uint64(id), 10))
+	return "/admin/dialogs/actions?" + values.Encode()
+}
+
+func stickerPreviewDialogHref(id uint) string {
+	return "/admin/dialogs/stickers/" + strconv.FormatUint(uint64(id), 10)
+}
+
 func modalActionClass(action RowAction) string {
 	switch action.Kind {
 	case "danger":
@@ -450,11 +424,15 @@ func filterChoiceClass(active bool) string {
 	return joinClasses(base, "border border-slate-200/80 bg-white/88 text-slate-600 hover:bg-white hover:text-slate-900")
 }
 
-func boolAttrText(v bool) string {
-	if v {
-		return "true"
+func dialogChipClass(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case "cyan":
+		return "inline-flex items-center rounded-full bg-cyan-50 px-3 py-1 text-[11px] font-semibold text-cyan-700 ring-1 ring-cyan-200/80"
+	case "teal":
+		return "inline-flex items-center rounded-full bg-teal-50 px-3 py-1 text-[11px] font-semibold text-teal-700 ring-1 ring-teal-200/80"
+	default:
+		return "inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200/80"
 	}
-	return "false"
 }
 
 func ternaryString(condition bool, whenTrue string, whenFalse string) string {
@@ -501,6 +479,113 @@ func jargonActions(status string) []RowAction {
 			{Label: "通过", Value: "approved", Kind: "approve", BusyLabel: "通过中", ConfirmText: "确认通过这条黑话？"},
 			{Label: "拒绝", Value: "rejected", Kind: "danger", BusyLabel: "拒绝中", ConfirmText: "确认拒绝这条黑话？"},
 		}
+	}
+}
+
+func StyleCardActionDialogData(item memory.StyleCard, targetStatus string, returnTo string) (AdminActionDialogContentData, bool) {
+	for _, action := range styleCardActions(item.Status) {
+		if strings.TrimSpace(action.Value) != strings.TrimSpace(targetStatus) {
+			continue
+		}
+		return AdminActionDialogContentData{
+			Title:       action.Label,
+			Body:        action.ConfirmText,
+			SubmitLabel: action.Label,
+			SubmitClass: modalActionClass(action),
+			BusyLabel:   action.BusyLabel,
+			Spotlight:   "“" + item.Example + "”",
+			Chips: []AdminActionChip{
+				{Label: "意图：" + item.Intent, Kind: "cyan"},
+				{Label: "语气：" + item.Tone, Kind: "teal"},
+			},
+			Hidden: []AdminActionHiddenField{
+				{Name: "action_kind", Value: "style-card-status"},
+				{Name: "action_id", Value: strconv.FormatUint(uint64(item.ID), 10)},
+				{Name: "status", Value: action.Value},
+			},
+			ReturnTo: returnTo,
+		}, true
+	}
+	return AdminActionDialogContentData{}, false
+}
+
+func JargonActionDialogData(item memory.Jargon, targetStatus string, returnTo string) (AdminActionDialogContentData, bool) {
+	for _, action := range jargonActions(jargonStatusValue(item)) {
+		if strings.TrimSpace(action.Value) != strings.TrimSpace(targetStatus) {
+			continue
+		}
+		return AdminActionDialogContentData{
+			Title:       action.Label,
+			Body:        action.ConfirmText,
+			SubmitLabel: action.Label,
+			SubmitClass: modalActionClass(action),
+			BusyLabel:   action.BusyLabel,
+			Fields: []AdminActionField{
+				{Label: "术语", Value: item.Content},
+				{Label: "释义", Value: item.Meaning},
+			},
+			Hidden: []AdminActionHiddenField{
+				{Name: "action_kind", Value: "jargon-status"},
+				{Name: "action_id", Value: strconv.FormatUint(uint64(item.ID), 10)},
+				{Name: "status", Value: action.Value},
+			},
+			ReturnTo: returnTo,
+		}, true
+	}
+	return AdminActionDialogContentData{}, false
+}
+
+func StickerDeleteDialogData(item memory.Sticker, returnTo string) AdminActionDialogContentData {
+	action := RowAction{Kind: "danger", BusyLabel: "删除中"}
+	return AdminActionDialogContentData{
+		Title:       "删除表情包",
+		Body:        "删除后会一并移除这张图片，请确认它已经不再需要。",
+		SubmitLabel: "确认删除",
+		SubmitClass: modalActionClass(action),
+		BusyLabel:   action.BusyLabel,
+		Fields: []AdminActionField{
+			{Label: "待删除内容", Value: stickerDescriptionText(item.Description)},
+		},
+		Hidden: []AdminActionHiddenField{
+			{Name: "action_kind", Value: "sticker-delete"},
+			{Name: "action_id", Value: strconv.FormatUint(uint64(item.ID), 10)},
+		},
+		ReturnTo: returnTo,
+	}
+}
+
+func MemoryDeleteDialogData(item memory.Memory, returnTo string) AdminActionDialogContentData {
+	action := RowAction{Kind: "danger", BusyLabel: "删除中"}
+	return AdminActionDialogContentData{
+		Title:       "删除记忆",
+		Body:        "删除后将无法再查看这条记忆。",
+		SubmitLabel: "确认删除",
+		SubmitClass: modalActionClass(action),
+		BusyLabel:   action.BusyLabel,
+		Fields: []AdminActionField{
+			{Label: "记忆内容", Value: item.Content},
+			{Label: "记忆类型", Value: memoryTypeText(item.Type)},
+		},
+		Hidden: []AdminActionHiddenField{
+			{Name: "action_kind", Value: "memory-delete"},
+			{Name: "action_id", Value: strconv.FormatUint(uint64(item.ID), 10)},
+		},
+		ReturnTo: returnTo,
+	}
+}
+
+func StickerPreviewDialogDataForItem(item memory.Sticker) StickerPreviewDialogData {
+	createdAtText := formatTime(item.CreatedAt)
+	meta := fmt.Sprintf("使用 %d 次", item.UseCount)
+	if strings.TrimSpace(createdAtText) != "" {
+		meta = fmt.Sprintf("使用 %d 次 · 创建于 %s", item.UseCount, createdAtText)
+	}
+	return StickerPreviewDialogData{
+		FileURL:     stickerFileURL(item.FileName),
+		Description: stickerDescriptionText(item.Description),
+		FileName:    item.FileName,
+		FileHash:    item.FileHash,
+		Meta:        meta,
 	}
 }
 

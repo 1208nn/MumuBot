@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "preline/variants.css";
+@import "../../../../node_modules/toastify-js/src/toastify.css";
 
 @plugin "@tailwindcss/forms";
 
@@ -80,6 +81,102 @@
       radial-gradient(circle at 78% 78%, rgba(103, 232, 249, 0.16), transparent 20%),
       linear-gradient(135deg, rgba(8, 17, 31, 0.98), rgba(15, 118, 110, 0.94), rgba(8, 145, 178, 0.92));
   }
+
+  .admin-toastify.toastify {
+    width: auto;
+    max-width: min(24rem, calc(100vw - 2rem));
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: inherit;
+  }
+
+  .admin-toastify.toastify .toast-close {
+    display: none;
+  }
+
+  .admin-toast {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    width: 100%;
+    border-radius: 1.45rem;
+    border: 1px solid rgb(209 213 219 / 0.8);
+    background: rgb(255 255 255 / 0.96);
+    padding: 1rem;
+    color: rgb(15 23 42);
+    box-shadow: 0 24px 60px rgba(8, 17, 31, 0.16);
+    backdrop-filter: blur(20px);
+  }
+
+  .admin-toast[data-kind="success"] {
+    border-color: rgb(167 243 208 / 0.95);
+    box-shadow:
+      0 24px 60px rgba(8, 17, 31, 0.16),
+      inset 0 0 0 1px rgb(209 250 229 / 0.9);
+  }
+
+  .admin-toast[data-kind="warn"] {
+    border-color: rgb(253 230 138 / 0.95);
+    box-shadow:
+      0 24px 60px rgba(8, 17, 31, 0.16),
+      inset 0 0 0 1px rgb(254 243 199 / 0.9);
+  }
+
+  .admin-toast[data-kind="error"] {
+    border-color: rgb(254 205 211 / 0.95);
+    box-shadow:
+      0 24px 60px rgba(8, 17, 31, 0.16),
+      inset 0 0 0 1px rgb(255 228 230 / 0.95);
+  }
+
+  .admin-toast__icon {
+    display: inline-flex;
+    height: 2.5rem;
+    width: 2.5rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 1rem;
+    border: 1px solid rgb(226 232 240 / 0.8);
+    background: rgb(248 250 252);
+  }
+
+  .admin-toast[data-kind="success"] .admin-toast__icon {
+    border-color: rgb(167 243 208 / 0.8);
+    background: rgb(236 253 245);
+    color: rgb(4 120 87);
+  }
+
+  .admin-toast[data-kind="warn"] .admin-toast__icon {
+    border-color: rgb(253 230 138 / 0.8);
+    background: rgb(255 251 235);
+    color: rgb(180 83 9);
+  }
+
+  .admin-toast[data-kind="error"] .admin-toast__icon {
+    border-color: rgb(254 205 211 / 0.8);
+    background: rgb(255 241 242);
+    color: rgb(190 24 93);
+  }
+
+  .admin-toast__close {
+    display: inline-flex;
+    height: 2.25rem;
+    width: 2.25rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    color: rgb(100 116 139);
+    transition: background-color 200ms ease-out, color 200ms ease-out;
+  }
+
+  .admin-toast__close:hover {
+    background: rgb(15 23 42 / 0.06);
+    color: rgb(51 65 85);
+  }
 }
 
 @layer utilities {
@@ -121,5 +218,9 @@
 
   body::before {
     animation: none;
+  }
+
+  .admin-toastify.toastify {
+    transition: none !important;
   }
 }

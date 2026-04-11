@@ -80,11 +80,6 @@ func saveJargonFunc(ctx context.Context, input *SaveJargonInput) (*SaveJargonOut
 		return &SaveJargonOutput{Success: false, Message: err.Error()}, nil
 	}
 
-	// 实时更新 AC 自动机
-	if lc.JargonMgr != nil {
-		lc.JargonMgr.AddJargon(input.Content, input.Meaning)
-	}
-
 	return &SaveJargonOutput{Success: true, Message: "已记住这个黑话"}, nil
 }
 
@@ -245,6 +240,9 @@ func reviewJargonFunc(ctx context.Context, input *ReviewJargonInput) (*ReviewJar
 	err := lc.MemMgr.BatchReviewJargon(input.IDs, input.Approve)
 	if err != nil {
 		return &ReviewJargonOutput{Success: false, Message: err.Error()}, nil
+	}
+	if lc.JargonMgr != nil {
+		lc.JargonMgr.Reload()
 	}
 
 	msg := "已拒绝这些黑话"

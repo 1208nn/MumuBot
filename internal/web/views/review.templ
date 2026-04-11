@@ -15,7 +15,7 @@ templ StyleCardListBody(data StyleCardListPageData) {
 	<div class="space-y-6">
 		@PageHeader("风格卡片", "查看示例、场景和使用情况，处理不合适的风格卡片。", "风格审核")
 		<div class="space-y-4 rounded-[1.7rem] border border-white/70 bg-white/82 p-4 shadow-[0_22px_60px_rgba(14,31,53,0.08)] backdrop-blur-xl motion-safe:animate-[admin-fade-up_220ms_ease-out] sm:p-5">
-			@FilterAccordion("style-card-filters", "筛选条件", "先按群号或关键词缩小范围，再处理需要调整的风格卡片。", ChoiceFilterGroup("status", "style-card-filter-form", data.Status, []FilterChoice{
+			@FilterPanel("style-card-filters", "筛选条件", "先按群号或关键词缩小范围，再处理需要调整的风格卡片。", ChoiceFilterGroup("status", "style-card-filter-form", data.Status, []FilterChoice{
 				{Label: "全部状态", Value: ""},
 				{Label: "候选", Value: "candidate"},
 				{Label: "已启用", Value: "active"},
@@ -70,22 +70,9 @@ templ StyleCardListBody(data StyleCardListPageData) {
 										class={ rowActionClass(action) }
 										type="button"
 										data-hs-overlay="#admin-action-dialog"
-										data-admin-action={ adminActionJSON(AdminActionPayload{
-											Title:       action.Label,
-											Body:        action.ConfirmText,
-											Endpoint:    fmt.Sprintf("/admin/actions/style-cards/%d/status", item.ID),
-											SubmitLabel: action.Label,
-											SubmitClass: modalActionClass(action),
-											BusyLabel:   action.BusyLabel,
-											Spotlight:   "“" + item.Example + "”",
-											Chips: []AdminActionChip{
-												{Label: "意图：" + item.Intent, Kind: "cyan"},
-												{Label: "语气：" + item.Tone, Kind: "teal"},
-											},
-											Hidden: []AdminActionHiddenField{
-												{Name: "status", Value: action.Value},
-											},
-										}) }>{ action.Label }</button>
+										hx-get={ styleCardActionDialogHref(item.ID, action.Value) }
+										hx-target="#admin-action-dialog-content"
+										hx-swap="innerHTML">{ action.Label }</button>
 								}
 							</div>
 						</aside>
@@ -98,7 +85,7 @@ templ StyleCardListBody(data StyleCardListPageData) {
 }
 
 templ StyleCardFilterForm(data StyleCardListPageData) {
-	<form id="style-card-filter-form" class="grid gap-2.5 xl:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] xl:items-center" method="get" action="/admin/style-cards" hx-get="/admin/style-cards" hx-target="#admin-page-body" hx-swap="outerHTML" hx-push-url="true">
+	<form id="style-card-filter-form" class="grid gap-2.5 xl:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] xl:items-center" method="get" action="/admin/style-cards" hx-get="/admin/style-cards" hx-trigger="change from:input[type='radio'], submit" hx-target="#admin-page-body" hx-swap="outerHTML" hx-push-url="true">
 		<input type="hidden" name="sort" value={ data.Sort.CurrentSort }/>
 		<input type="hidden" name="order" value={ data.Sort.CurrentOrder }/>
 		<input class="block w-full min-w-0 rounded-2xl border-slate-200/80 bg-white/90 px-4 py-2.5 text-sm text-slate-800 shadow-none placeholder:text-slate-400 focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100" type="text" name="group_id" value={ data.GroupID } placeholder="群号"/>
@@ -120,7 +107,7 @@ templ JargonListBody(data JargonListPageData) {
 	<div class="space-y-6">
 		@PageHeader("黑话", "筛选、查看并更新术语状态。", "黑话审核")
 		<div class="space-y-4 rounded-[1.7rem] border border-white/70 bg-white/82 p-4 shadow-[0_22px_60px_rgba(14,31,53,0.08)] backdrop-blur-xl motion-safe:animate-[admin-fade-up_220ms_ease-out] sm:p-5">
-			@FilterAccordion("jargon-filters", "筛选条件", "先按群号或关键词缩小范围，再处理需要关注的术语。", ChoiceFilterGroup("status", "jargon-filter-form", data.Status, []FilterChoice{
+			@FilterPanel("jargon-filters", "筛选条件", "先按群号或关键词缩小范围，再处理需要关注的术语。", ChoiceFilterGroup("status", "jargon-filter-form", data.Status, []FilterChoice{
 				{Label: "全部状态", Value: ""},
 				{Label: "待审核", Value: "pending"},
 				{Label: "已通过", Value: "approved"},
@@ -152,21 +139,9 @@ templ JargonListBody(data JargonListPageData) {
 										class={ rowActionClass(action) }
 										type="button"
 										data-hs-overlay="#admin-action-dialog"
-										data-admin-action={ adminActionJSON(AdminActionPayload{
-											Title:       action.Label,
-											Body:        action.ConfirmText,
-											Endpoint:    fmt.Sprintf("/admin/actions/jargons/%d/status", item.ID),
-											SubmitLabel: action.Label,
-											SubmitClass: modalActionClass(action),
-											BusyLabel:   action.BusyLabel,
-											Fields: []AdminActionField{
-												{Label: "术语", Value: item.Content},
-												{Label: "释义", Value: item.Meaning},
-											},
-											Hidden: []AdminActionHiddenField{
-												{Name: "status", Value: action.Value},
-											},
-										}) }>{ action.Label }</button>
+										hx-get={ jargonActionDialogHref(item.ID, action.Value) }
+										hx-target="#admin-action-dialog-content"
+										hx-swap="innerHTML">{ action.Label }</button>
 								}
 							</div>
 						</aside>
@@ -179,7 +154,7 @@ templ JargonListBody(data JargonListPageData) {
 }
 
 templ JargonFilterForm(data JargonListPageData) {
-	<form id="jargon-filter-form" class="grid gap-2.5 xl:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] xl:items-center" method="get" action="/admin/jargons" hx-get="/admin/jargons" hx-target="#admin-page-body" hx-swap="outerHTML" hx-push-url="true">
+	<form id="jargon-filter-form" class="grid gap-2.5 xl:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] xl:items-center" method="get" action="/admin/jargons" hx-get="/admin/jargons" hx-trigger="change from:input[type='radio'], submit" hx-target="#admin-page-body" hx-swap="outerHTML" hx-push-url="true">
 		<input type="hidden" name="sort" value={ data.Sort.CurrentSort }/>
 		<input type="hidden" name="order" value={ data.Sort.CurrentOrder }/>
 		<input class="block w-full min-w-0 rounded-2xl border-slate-200/80 bg-white/90 px-4 py-2.5 text-sm text-slate-800 shadow-none placeholder:text-slate-400 focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100" type="text" name="group_id" value={ data.GroupID } placeholder="群号"/>

@@ -9,6 +9,7 @@ amu.exe
 
 # 测试
 *.test
+*_test.go
 *_templ.go
 
 # 输出

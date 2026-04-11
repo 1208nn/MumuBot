@@ -840,22 +840,12 @@ func (m *Manager) GetOrCreateMemberProfile(userID int64, nickname string) (*Memb
 
 // UpdateMemberProfile 更新成员画像
 func (m *Manager) UpdateMemberProfile(profile *MemberProfile) error {
-	// 计算活跃度：基于最近发言时间和消息数量
-	// 活跃度衰减：每天降低0.1，最低0.1
-	daysSinceLastSpeak := time.Since(profile.LastSpeak).Hours() / 24
-	if daysSinceLastSpeak > 0 {
-		profile.Activity -= 0.1 * daysSinceLastSpeak
-		if profile.Activity < 0.1 {
-			profile.Activity = 0.1
-		}
+	var existing MemberProfile
+	if err := m.db.Where("user_id = ?", profile.UserID).First(&existing).Error; err != nil {
+		return err
 	}
-	// 发言增加活跃度
-	if time.Since(profile.LastSpeak) < time.Hour {
-		profile.Activity += 0.05
-		if profile.Activity > 1.0 {
-			profile.Activity = 1.0
-		}
-	}
+
+	profile.Activity = applyActivityUpdate(profile.Activity, existing.LastSpeak, profile.LastSpeak)
 	return m.db.Save(profile).Error
 }
 
@@ -942,6 +932,9 @@ func (m *Manager) Close() error {
 	// 关闭 Milvus 连接
 	if m.milvus != nil {
 		_ = m.milvus.Close()
+	}
+	if m.styleCardMilvus != nil {
+		_ = m.styleCardMilvus.Close()
 	}
 	// 关闭 MySQL 连接
 	if sqlDB, err := m.db.DB(); err == nil {

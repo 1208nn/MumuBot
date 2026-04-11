@@ -547,23 +547,6 @@ func (c *Client) parseMessageSegments(event map[string]interface{}, msg *GroupMe
 		case "reply":
 			if replyMsgID, ok := parseInt64(data["id"]); ok {
 				msg.Reply = &ReplyInfo{MessageID: replyMsgID}
-				// 同步获取被回复消息内容
-				replyCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
-				replyData, err := c.GetMsg(replyCtx, replyMsgID)
-				cancel()
-				if err == nil && replyData != nil {
-					if rawMsg, ok := replyData["raw_message"].(string); ok {
-						msg.Reply.Content = rawMsg
-					}
-					if sender, ok := replyData["sender"].(map[string]interface{}); ok {
-						if uid, ok := parseInt64(sender["user_id"]); ok {
-							msg.Reply.SenderID = uid
-						}
-						if nick, ok := sender["nickname"].(string); ok {
-							msg.Reply.Nickname = nick
-						}
-					}
-				}
 			}
 
 		case "mface": // 商城表情/魔法表情

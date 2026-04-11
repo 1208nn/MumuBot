@@ -74,6 +74,9 @@ type AdminService struct {
 	memDeleter interface {
 		DeleteMemory(ctx context.Context, id uint) error
 	}
+	jargonReloader interface {
+		ReloadJargons()
+	}
 }
 
 type OverviewStats struct {
@@ -104,6 +107,14 @@ func (s *AdminService) WithMemoryDeleter(deleter interface {
 },
 ) *AdminService {
 	s.memDeleter = deleter
+	return s
+}
+
+func (s *AdminService) WithJargonReloader(reloader interface {
+	ReloadJargons()
+},
+) *AdminService {
+	s.jargonReloader = reloader
 	return s
 }
 
@@ -317,6 +328,12 @@ func (s *AdminService) ListStyleCards(filter StyleCardFilter) (Page[memory.Style
 	return result, nil
 }
 
+func (s *AdminService) GetStyleCard(id uint) (memory.StyleCard, error) {
+	var item memory.StyleCard
+	err := s.db.First(&item, id).Error
+	return item, err
+}
+
 func (s *AdminService) ListJargons(filter JargonFilter) (Page[memory.Jargon], error) {
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
 	result := Page[memory.Jargon]{Page: page, PageSize: pageSize}
@@ -348,6 +365,12 @@ func (s *AdminService) ListJargons(filter JargonFilter) (Page[memory.Jargon], er
 	return result, nil
 }
 
+func (s *AdminService) GetJargon(id uint) (memory.Jargon, error) {
+	var item memory.Jargon
+	err := s.db.First(&item, id).Error
+	return item, err
+}
+
 func (s *AdminService) ListMemories(filter MemoryFilter) (Page[memory.Memory], error) {
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
 	result := Page[memory.Memory]{Page: page, PageSize: pageSize}
@@ -373,6 +396,12 @@ func (s *AdminService) ListMemories(filter MemoryFilter) (Page[memory.Memory], e
 	return result, nil
 }
 
+func (s *AdminService) GetMemory(id uint) (memory.Memory, error) {
+	var item memory.Memory
+	err := s.db.First(&item, id).Error
+	return item, err
+}
+
 func (s *AdminService) ListStickers(filter StickerFilter) (Page[memory.Sticker], error) {
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
 	result := Page[memory.Sticker]{Page: page, PageSize: pageSize}
@@ -391,6 +420,12 @@ func (s *AdminService) ListStickers(filter StickerFilter) (Page[memory.Sticker],
 		return result, err
 	}
 	return result, nil
+}
+
+func (s *AdminService) GetSticker(id uint) (memory.Sticker, error) {
+	var item memory.Sticker
+	err := s.db.First(&item, id).Error
+	return item, err
 }
 
 func (s *AdminService) ListMemberProfiles(filter MemberFilter) (Page[memory.MemberProfile], error) {
@@ -530,9 +565,17 @@ func (s *AdminService) UpdateJargonStatus(id uint, status string) error {
 		return fmt.Errorf("invalid jargon status: %s", status)
 	}
 
-	return s.db.Model(&memory.Jargon{}).
+	if err := s.db.Model(&memory.Jargon{}).
 		Where("id = ?", id).
-		Updates(updates).Error
+		Updates(updates).Error; err != nil {
+		return err
+	}
+
+	if s.jargonReloader != nil {
+		s.jargonReloader.ReloadJargons()
+	}
+
+	return nil
 }
 
 func (s *AdminService) DeleteSticker(id uint) error {

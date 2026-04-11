@@ -13,40 +13,48 @@ type FlashMessage struct {
 	Body  string
 }
 
-type AdminActionChip struct {
-	Label string `json:"label"`
-	Kind  string `json:"kind"`
-}
-
-type AdminActionField struct {
-	Label string `json:"label"`
-	Value string `json:"value"`
-}
-
-type AdminActionHiddenField struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-}
-
-type AdminActionPayload struct {
-	Title       string                   `json:"title"`
-	Body        string                   `json:"body,omitempty"`
-	Endpoint    string                   `json:"endpoint"`
-	SubmitLabel string                   `json:"submitLabel"`
-	SubmitClass string                   `json:"submitClass"`
-	BusyLabel   string                   `json:"busyLabel,omitempty"`
-	Spotlight   string                   `json:"spotlight,omitempty"`
-	Chips       []AdminActionChip        `json:"chips,omitempty"`
-	Fields      []AdminActionField       `json:"fields,omitempty"`
-	Hidden      []AdminActionHiddenField `json:"hidden,omitempty"`
-}
-
 type RowAction struct {
 	Label       string
 	Value       string
 	Kind        string
 	BusyLabel   string
 	ConfirmText string
+}
+
+type AdminActionChip struct {
+	Label string
+	Kind  string
+}
+
+type AdminActionField struct {
+	Label string
+	Value string
+}
+
+type AdminActionHiddenField struct {
+	Name  string
+	Value string
+}
+
+type AdminActionDialogContentData struct {
+	Title       string
+	Body        string
+	SubmitLabel string
+	SubmitClass string
+	BusyLabel   string
+	Spotlight   string
+	Chips       []AdminActionChip
+	Fields      []AdminActionField
+	Hidden      []AdminActionHiddenField
+	ReturnTo    string
+}
+
+type StickerPreviewDialogData struct {
+	FileURL     string
+	Description string
+	FileName    string
+	FileHash    string
+	Meta        string
 }
 
 type LayoutData struct {

@@ -21,6 +21,9 @@ func NewVisionClient() (*VisionClient, error) {
 	if !cfg.Enabled {
 		return nil, nil
 	}
+	if cfg.APIKey == "" || cfg.BaseURL == "" || cfg.Model == "" {
+		return nil, fmt.Errorf("视觉模型配置不完整")
+	}
 
 	ctx := context.Background()
 	model, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{

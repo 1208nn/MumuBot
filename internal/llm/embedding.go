@@ -17,9 +17,8 @@ type EmbeddingClient struct {
 // NewEmbeddingClient 创建 Embedding 客户端
 func NewEmbeddingClient() (*EmbeddingClient, error) {
 	cfg := config.Get()
-	// 检查是否启用
-	if !cfg.Embedding.Enabled {
-		return nil, nil
+	if cfg.Embedding.APIKey == "" || cfg.Embedding.BaseURL == "" || cfg.Embedding.Model == "" {
+		return nil, fmt.Errorf("embedding 配置不完整")
 	}
 
 	ctx := context.Background()

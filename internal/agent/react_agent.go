@@ -34,6 +34,10 @@ import (
 const (
 	agentThinkTimeout          = 60 * time.Second
 	styleClassificationTimeout = 20 * time.Second
+	replyCacheTTL              = 30 * time.Minute
+	replyCacheCapacity         = 1024
+	visionCacheTTL             = 6 * time.Hour
+	visionCacheCapacity        = 512
 )
 
 // Agent 沐沐智能体
@@ -43,7 +47,6 @@ type Agent struct {
 	persona         *persona.Persona
 	memory          *memory.Manager
 	model           model.ToolCallingChatModel
-	auxModel        model.ToolCallingChatModel
 	vision          *llm.VisionClient // 多模态视觉模型
 	bot             *onebot.Client
 	react           *react.Agent
@@ -54,6 +57,9 @@ type Agent struct {
 
 	jargonMgr *jargon.Manager   // 黑话管理器
 	learner   *learning.Learner // 后台学习系统
+
+	replyCache  *utils.TTLCache[int64, onebot.ReplyInfo]
+	visionCache *utils.TTLCache[string, string]
 
 	// 消息缓冲（使用 ring buffer 避免扩容缩容开销）
 	buffers   map[int64]*utils.RingBuffer[*onebot.GroupMessage]
@@ -120,15 +126,11 @@ func New(mem *memory.Manager) (*Agent, error) {
 		pendingThinks:     make(map[int64]*pendingThink),
 		processing:        make(map[int64]bool),
 		lastProcessedTime: make(map[int64]time.Time),
+		replyCache:        utils.NewTTLCache[int64, onebot.ReplyInfo](replyCacheCapacity, replyCacheTTL),
+		visionCache:       utils.NewTTLCache[string, string](visionCacheCapacity, visionCacheTTL),
 	}
 
 	zap.L().Info("人格已加载", zap.String("name", a.persona.GetName()))
-
-	if auxModel, err := llm.NewAuxClient(); err == nil {
-		a.auxModel = auxModel
-	} else {
-		zap.L().Debug("初始化辅助分类模型失败，将回退主模型", zap.Error(err))
-	}
 
 	// 初始化并发管理器
 	a.concurrencyMgr = NewConcurrencyManager(a.ctx, cfg.Agent.MaxCoroutine, a.think)
@@ -179,7 +181,6 @@ func (a *Agent) initTools() error {
 		func() (tool.BaseTool, error) { return tools.NewSearchJargonTool() },
 		func() (tool.BaseTool, error) { return tools.NewSearchStyleCardsTool() },
 		// 用户信息
-		func() (tool.BaseTool, error) { return tools.NewUpdateMemberProfileTool() },
 		func() (tool.BaseTool, error) { return tools.NewGetMemberInfoTool() },
 		func() (tool.BaseTool, error) { return tools.NewGetRecentMessagesTool() },
 		// 发言相关
@@ -251,9 +252,9 @@ func (a *Agent) initReact() error {
 }
 
 func (a *Agent) initStyleClassifier() error {
-	classifier := a.auxModel
-	if classifier == nil {
-		classifier = a.model
+	classifier, err := llm.NewStyleClassificationClient()
+	if err != nil {
+		return err
 	}
 	if classifier == nil {
 		return fmt.Errorf("分类模型未初始化")
@@ -390,6 +391,13 @@ func (a *Agent) MCPToolCount() int {
 	return len(a.mcpMgr.GetTools())
 }
 
+func (a *Agent) ReloadJargons() {
+	if a == nil || a.jargonMgr == nil {
+		return
+	}
+	a.jargonMgr.Reload()
+}
+
 func (a *Agent) onMessage(msg *onebot.GroupMessage) {
 	if err := a.ctx.Err(); err != nil {
 		return
@@ -399,8 +407,12 @@ func (a *Agent) onMessage(msg *onebot.GroupMessage) {
 		return
 	}
 
-	// 检测是否通过名字或别名提及了沐沐
-	isMentioned := msg.IsMentioned || a.persona.IsMentioned(msg.Content)
+	if err := a.resolveReplyInfo(msg); err != nil {
+		zap.L().Debug("解析回复消息失败", zap.Int64("group_id", msg.GroupID), zap.Int64("message_id", msg.MessageID), zap.Error(err))
+	}
+
+	// 检测是否通过名字、别名或直接回复提及了沐沐
+	isMentioned := msg.IsMentioned || a.persona.IsMentioned(msg.Content) || replyTargetsSelf(msg.Reply, a.bot.GetSelfID())
 
 	// 序列化合并转发内容
 	forwardsJSON := ""
@@ -450,6 +462,127 @@ func (a *Agent) onMessage(msg *onebot.GroupMessage) {
 	a.scheduleThink(msg.GroupID, isMentioned, false)
 }
 
+func (a *Agent) resolveReplyInfo(msg *onebot.GroupMessage) error {
+	if msg == nil || msg.Reply == nil || msg.Reply.MessageID == 0 {
+		return nil
+	}
+	if msg.Reply.Content != "" && msg.Reply.SenderID != 0 {
+		a.replyCache.Set(msg.Reply.MessageID, *msg.Reply)
+		return nil
+	}
+
+	if reply := findReplyInfoInMessages(a.getBuffer(msg.GroupID), msg.Reply.MessageID); reply != nil {
+		msg.Reply = reply
+		a.replyCache.Set(reply.MessageID, *reply)
+		return nil
+	}
+
+	log, err := a.memory.GetMessageLogByID(fmt.Sprintf("%d", msg.Reply.MessageID))
+	if err == nil {
+		if reply := replyInfoFromMessageLog(log); reply != nil {
+			msg.Reply = reply
+			a.replyCache.Set(reply.MessageID, *reply)
+			return nil
+		}
+	}
+
+	if cached, ok := a.replyCache.Get(msg.Reply.MessageID); ok {
+		msg.Reply = cloneReplyInfo(cached)
+		return nil
+	}
+
+	reply, err := a.fetchReplyInfo(msg.Reply.MessageID)
+	if err != nil {
+		return err
+	}
+	if reply != nil {
+		msg.Reply = reply
+		a.replyCache.Set(reply.MessageID, *reply)
+	}
+	return nil
+}
+
+func (a *Agent) fetchReplyInfo(messageID int64) (*onebot.ReplyInfo, error) {
+	if a.bot == nil || messageID == 0 {
+		return nil, nil
+	}
+
+	replyCtx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
+	defer cancel()
+
+	replyData, err := a.bot.GetMsg(replyCtx, messageID)
+	if err != nil {
+		return nil, err
+	}
+	if replyData == nil {
+		return &onebot.ReplyInfo{MessageID: messageID}, nil
+	}
+
+	reply := &onebot.ReplyInfo{MessageID: messageID}
+	if rawMsg, ok := replyData["raw_message"].(string); ok {
+		reply.Content = rawMsg
+	}
+	if sender, ok := replyData["sender"].(map[string]interface{}); ok {
+		if uid, ok := parseInt64Value(sender["user_id"]); ok {
+			reply.SenderID = uid
+		}
+		if nick, ok := sender["nickname"].(string); ok {
+			reply.Nickname = nick
+		}
+	}
+
+	return reply, nil
+}
+
+func visionCacheKey(kind string, remoteURL string, file string) string {
+	key := strings.TrimSpace(remoteURL)
+	if key == "" {
+		key = strings.TrimSpace(file)
+	}
+	if key == "" {
+		return ""
+	}
+	return kind + ":" + key
+}
+
+func (a *Agent) describeImageCached(ctx context.Context, img onebot.ImageInfo) (string, error) {
+	if a.vision == nil || img.URL == "" {
+		return "", nil
+	}
+
+	cacheKey := visionCacheKey("image", img.URL, img.File)
+	if cacheKey != "" {
+		if cached, ok := a.visionCache.Get(cacheKey); ok {
+			return cached, nil
+		}
+	}
+
+	desc, err := a.vision.DescribeImage(ctx, img.URL)
+	if err == nil && cacheKey != "" && strings.TrimSpace(desc) != "" {
+		a.visionCache.Set(cacheKey, desc)
+	}
+	return desc, err
+}
+
+func (a *Agent) describeVideoCached(ctx context.Context, vid onebot.VideoInfo) (string, error) {
+	if a.vision == nil || vid.URL == "" {
+		return "", nil
+	}
+
+	cacheKey := visionCacheKey("video", vid.URL, vid.File)
+	if cacheKey != "" {
+		if cached, ok := a.visionCache.Get(cacheKey); ok {
+			return cached, nil
+		}
+	}
+
+	desc, err := a.vision.DescribeVideo(ctx, vid.URL)
+	if err == nil && cacheKey != "" && strings.TrimSpace(desc) != "" {
+		a.visionCache.Set(cacheKey, desc)
+	}
+	return desc, err
+}
+
 // parseMessageContent 解析消息内容（图片、视频、表情、回复等）
 func (a *Agent) parseMessageContent(msg *onebot.GroupMessage) string {
 	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
@@ -488,8 +621,8 @@ func (a *Agent) parseMessageContent(msg *onebot.GroupMessage) string {
 		if img.SubType == 1 {
 			// 表情包类型
 			var visionDesc string
-			if a.vision != nil && img.URL != "" {
-				if d, err := a.vision.DescribeImage(ctx, img.URL); err == nil {
+			if a.vision != nil {
+				if d, err := a.describeImageCached(ctx, img); err == nil {
 					visionDesc = d
 				}
 			}
@@ -513,8 +646,8 @@ func (a *Agent) parseMessageContent(msg *onebot.GroupMessage) string {
 			}
 		} else {
 			// 普通图片
-			if a.vision != nil && img.URL != "" {
-				if desc, err := a.vision.DescribeImage(ctx, img.URL); err == nil {
+			if a.vision != nil {
+				if desc, err := a.describeImageCached(ctx, img); err == nil && desc != "" {
 					content += " " + desc
 				} else {
 					content += " [图片]"
@@ -527,8 +660,8 @@ func (a *Agent) parseMessageContent(msg *onebot.GroupMessage) string {
 
 	// 处理视频（调用 Vision 模型识别）
 	for _, vid := range msg.Videos {
-		if a.vision != nil && vid.URL != "" {
-			if desc, err := a.vision.DescribeVideo(ctx, vid.URL); err == nil {
+		if a.vision != nil {
+			if desc, err := a.describeVideoCached(ctx, vid); err == nil && desc != "" {
 				content += " " + desc
 			} else {
 				content += " [视频]"
@@ -1012,7 +1145,10 @@ func collectTextContext(msgs []*onebot.GroupMessage) string {
 
 	parts := make([]string, 0, len(msgs))
 	for _, msg := range msgs {
-		text := strings.TrimSpace(msg.Content)
+		text := strings.TrimSpace(msg.FinalContent)
+		if text == "" {
+			text = strings.TrimSpace(msg.Content)
+		}
 		if text == "" {
 			continue
 		}
@@ -1053,7 +1189,8 @@ func (a *Agent) buildStyleHintContext(ctx context.Context, groupID int64) []stri
 }
 
 func (a *Agent) classifyStyleContext(ctx context.Context, groupID int64) (*tools.StyleClassification, error) {
-	contextText := collectTextContext(a.getBuffer(groupID))
+	bufferSize := config.Get().Agent.MessageBufferSize
+	contextText := collectTextContext(trimStyleClassificationMessages(a.getBuffer(groupID), bufferSize))
 	if contextText == "" {
 		return nil, fmt.Errorf("没有可分类的文字消息")
 	}

@@ -59,8 +59,7 @@ func main() {
 
 	embeddingClient, err := llm.NewEmbeddingClient()
 	if err != nil {
-		zap.L().Error("Embedding 客户端创建失败，向量检索不可用", zap.Error(err))
-		embeddingClient = nil
+		zap.L().Fatal("Embedding 客户端创建失败", zap.Error(err))
 	}
 
 	memoryMgr, err := memory.NewManager(embeddingClient)
@@ -80,7 +79,9 @@ func main() {
 	if stickerDir == "" {
 		stickerDir = "./stickers"
 	}
-	adminService := services.NewAdminService(memoryMgr.GetDB(), stickerDir).WithMemoryDeleter(memoryMgr)
+	adminService := services.NewAdminService(memoryMgr.GetDB(), stickerDir).
+		WithMemoryDeleter(memoryMgr).
+		WithJargonReloader(mumuAgent)
 	app := webapp.New(cfg, adminService, runtimeSource{
 		cfg:       cfg,
 		memMgr:    memoryMgr,

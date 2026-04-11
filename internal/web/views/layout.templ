@@ -1,6 +1,6 @@
 package views
 
-templ AdminHead(title string) {
+templ AdminHead(title string, flash *FlashMessage) {
 	<head>
 		<meta charset="utf-8"/>
 		<meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -9,6 +9,9 @@ templ AdminHead(title string) {
 		<link rel="icon" type="image/svg+xml" href={ faviconHref() }/>
 		<link rel="preconnect" href="https://fonts.font.im"/>
 		<link href="https://fonts.font.im/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+		if flash != nil {
+			<meta id="admin-flash-payload" name="admin-flash" content={ flashJSON(flash) }/>
+		}
 		<link rel="stylesheet" href={ adminCSSHref() }/>
 		<script type="text/javascript" src={ adminJSHref() } defer></script>
 	</head>
@@ -30,174 +33,96 @@ templ PageContent(content templ.Component) {
 templ LayoutWithOverlay(data LayoutData, content templ.Component, overlay templ.Component) {
 	<!doctype html>
 	<html lang="zh-CN">
-		@AdminHead(data.Title)
-		<body class="min-h-screen font-sans text-slate-800 antialiased selection:bg-cyan-200/60">
-			<header class="sticky top-0 z-30 border-b border-white/70 bg-white/70 backdrop-blur-xl lg:hidden">
-				<div class="flex items-center gap-3 px-4 py-3">
-					<button
-						type="button"
-						class="inline-flex size-11 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/82 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] transition duration-200 ease-out hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
-						data-hs-overlay="#admin-sidebar-overlay"
-						aria-controls="admin-sidebar-overlay"
-						aria-haspopup="dialog"
-						aria-expanded="false"
-						aria-label="打开导航">
-						<span class="sr-only">打开导航</span>
-						<svg class="size-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-							<path d="M4 5.5h12"></path>
-							<path d="M4 10h12"></path>
-							<path d="M4 14.5h12"></path>
-						</svg>
-					</button>
-					<div class="min-w-0">
-						<div class="text-sm font-bold tracking-[-0.02em] text-slate-900">{ data.Title }</div>
+		@AdminHead(data.Title, data.Flash)
+		<body x-data="adminShell" class="min-h-screen font-sans text-slate-800 antialiased selection:bg-cyan-200/60">
+			<div class="min-h-screen">
+				<header class="sticky top-0 z-30 border-b border-white/70 bg-white/70 backdrop-blur-xl lg:hidden">
+					<div class="flex items-center gap-3 px-4 py-3">
+						<button
+							type="button"
+							class="inline-flex size-11 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/82 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] transition duration-200 ease-out hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+							data-hs-overlay="#admin-sidebar-overlay"
+							aria-controls="admin-sidebar-overlay"
+							aria-haspopup="dialog"
+							aria-label="打开导航">
+							<span class="sr-only">打开导航</span>
+							<svg class="size-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+								<path d="M4 5.5h12"></path>
+								<path d="M4 10h12"></path>
+								<path d="M4 14.5h12"></path>
+							</svg>
+						</button>
+						<div class="min-w-0">
+							<div class="text-sm font-bold tracking-[-0.02em] text-slate-900">{ data.Title }</div>
+						</div>
 					</div>
+				</header>
+				<div class="relative mx-auto min-h-screen w-full max-w-[1512px] px-3 sm:px-4 lg:px-4 xl:px-5">
+					<aside
+						id="admin-sidebar-overlay"
+						class="hs-overlay hidden fixed inset-y-0 start-0 z-[90] w-[min(15.5rem,calc(100vw-2rem))] -translate-x-full transform transition-transform duration-300 ease-out hs-overlay-open:translate-x-0 lg:absolute lg:inset-y-0 lg:start-0 lg:z-20 lg:block lg:translate-x-0 lg:transition-[width] lg:duration-300 lg:ease-out [--auto-close:lg] [--opened:lg] [--body-scroll:true] lg:[--body-scroll:false]"
+						x-bind:class="sidebarCollapsed ? 'lg:w-[5.5rem]' : 'lg:w-64'"
+						data-hs-overlay-options='{"backdropClasses":"hs-overlay-backdrop transition duration-300 fixed inset-0 bg-slate-950/28"}'
+						tabindex="-1"
+						aria-labelledby="admin-sidebar-title">
+						<div class="h-full px-3 py-3 lg:sticky lg:top-0 lg:h-screen lg:px-0 lg:py-6">
+							@SidebarPanel(data)
+						</div>
+					</aside>
+					<main class="min-w-0 pb-8 pt-5 transition-[padding-left] duration-300 ease-out motion-reduce:transition-none lg:pb-12 lg:pe-1 lg:pt-8" x-bind:class="sidebarCollapsed ? 'lg:ps-[calc(5.5rem+1rem)]' : 'lg:ps-[calc(16rem+1rem)]'">
+						@PageContent(content)
+					</main>
 				</div>
-			</header>
-			<div x-data="adminSidebarState()" data-admin-sidebar-shell="true" class="mx-auto flex min-h-screen w-full max-w-[1512px] gap-4 px-3 lg:px-4 xl:px-5">
-				<aside x-bind:class="collapsed ? 'w-[5.5rem]' : 'w-[16rem]'" class="hidden shrink-0 px-3 py-6 transition-[width] duration-300 ease-out lg:block">
-					<div class="sticky top-6">
-						@SidebarPanel(data, false)
-					</div>
-				</aside>
-				<div
-					id="admin-sidebar-overlay"
-					class="hs-overlay hidden fixed inset-0 z-[90] overflow-hidden bg-transparent opacity-0 transition-opacity duration-300 ease-out hs-overlay-open:opacity-100 lg:hidden"
-					tabindex="-1"
-					aria-labelledby="admin-sidebar-title">
-					<div class="hs-overlay-animation-target h-full max-w-[15.5rem] -translate-x-full p-3 transition-transform duration-300 ease-out hs-overlay-open:translate-x-0">
-						@SidebarPanel(data, true)
-					</div>
-				</div>
-				<main class="min-w-0 flex-1 px-3 pb-8 pt-5 transition-[width,padding] duration-300 ease-out sm:px-4 lg:px-5 lg:pb-12 lg:pt-8">
-					@PageContent(content)
-				</main>
+				@AdminActionDialog()
+				@overlay
 			</div>
-			@ToastViewport(data.Flash)
-			@AdminActionDialog()
-			@overlay
 		</body>
 	</html>
-}
-
-templ ToastViewport(flash *FlashMessage) {
-	<div data-admin-toast-viewport="true" class="pointer-events-none fixed inset-x-4 top-4 z-[80] flex flex-col items-end gap-3 sm:inset-x-auto sm:right-6 sm:top-6">
-		if flash != nil {
-			@ToastCard(*flash)
-		}
-	</div>
-}
-
-templ ToastCard(flash FlashMessage) {
-	<div
-		data-admin-toast="true"
-		data-admin-toast-kind={ flash.Kind }
-		role={ flashRole(flash.Kind) }
-		aria-live={ flashLive(flash.Kind) }
-		aria-atomic="true"
-		class={ joinClasses(flashClass(flash.Kind), "transform transition duration-200 ease-out motion-reduce:transition-none") }>
-		<div class="flex items-start gap-3">
-			<div class={ flashIconClass(flash.Kind) }>
-				@AdminIcon(flashIconName(flash.Kind), "size-4", "flash-"+flashIconName(flash.Kind))
-			</div>
-			<div class="min-w-0 flex-1">
-				<div class="text-[15px] font-extrabold leading-6 tracking-[-0.01em] text-slate-950">{ flash.Title }</div>
-				if flash.Body != "" {
-					<div class="mt-1 text-sm leading-6 text-slate-600">{ flash.Body }</div>
-				}
-			</div>
-			<button
-				type="button"
-				data-admin-toast-close="true"
-				class={ flashCloseButtonClass(flash.Kind) }
-				aria-label="关闭提示">
-				<svg class="size-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-					<path d="m6 6 8 8"></path>
-					<path d="m14 6-8 8"></path>
-				</svg>
-			</button>
-		</div>
-	</div>
 }
 
 templ AdminActionDialog() {
 	<div id="admin-action-dialog" class="hs-overlay hidden fixed inset-0 z-[100] overflow-y-auto bg-transparent px-4 py-6 opacity-0 transition-opacity duration-200 ease-out hs-overlay-open:opacity-100 sm:px-6 sm:py-8 [--overlay-backdrop:false]" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="admin-action-dialog-title" data-admin-overlay="dialog">
 		<div class="flex min-h-[calc(100dvh-3rem)] items-center justify-center sm:min-h-[calc(100dvh-4rem)]">
 			<div class="hs-overlay-animation-target relative my-auto max-h-[calc(100dvh-3rem)] w-full max-w-[calc(100vw-2rem)] translate-y-3 scale-[0.985] overflow-y-auto rounded-[2rem] border border-white/80 bg-white/98 p-6 opacity-0 shadow-[0_34px_110px_rgba(8,17,31,0.2),0_14px_36px_rgba(8,17,31,0.1)] transition duration-200 ease-out hs-overlay-open:translate-y-0 hs-overlay-open:scale-100 hs-overlay-open:opacity-100 sm:max-h-[calc(100dvh-4rem)] sm:max-w-xl sm:p-7">
-				<div class="flex items-start justify-between gap-4">
-					<div class="min-w-0">
-						<h3 id="admin-action-dialog-title" data-admin-action-dialog-title class="text-xl font-extrabold tracking-[-0.03em] text-slate-950">确认操作</h3>
-						<div data-admin-action-dialog-body class="mt-2 hidden text-sm leading-7 text-slate-600"></div>
-					</div>
-					<button
-						type="button"
-						class="inline-flex size-10 shrink-0 items-center justify-center rounded-full border border-slate-200/80 bg-white/82 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] transition duration-200 ease-out hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
-						data-hs-overlay="#admin-action-dialog"
-						data-admin-action-dialog-close="true"
-						aria-label="关闭弹层">
-						<span class="sr-only">关闭弹层</span>
-						<svg class="size-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-							<path d="m6 6 8 8"></path>
-							<path d="m14 6-8 8"></path>
-						</svg>
-					</button>
-				</div>
-				<div class="mt-5 space-y-4">
-					<div data-admin-action-dialog-spotlight class="admin-example-spotlight hidden rounded-[1.5rem] p-4 text-white shadow-[0_18px_40px_rgba(15,23,42,0.16)] ring-1 ring-white/10">
-						<div data-admin-action-dialog-spotlight-text class="text-xl font-extrabold leading-9 tracking-[-0.04em]"></div>
-					</div>
-					<div data-admin-action-dialog-chips class="hidden flex flex-wrap gap-2"></div>
-					<div data-admin-action-dialog-fields class="hidden grid gap-3 sm:grid-cols-2"></div>
-					<form data-admin-action-dialog-form class="mt-5" method="post" action="" hx-post="" hx-target="#admin-page-body" hx-swap="outerHTML">
-						<input type="hidden" name="return_to" value=""/>
-						<div data-admin-action-dialog-hidden></div>
-						<div class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-							<button type="button" class="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200/80 bg-white/82 px-4 py-3 text-sm font-semibold text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] transition duration-200 ease-out hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-wait disabled:opacity-70" data-hs-overlay="#admin-action-dialog" data-admin-action-dialog-close="true">取消</button>
-							<button data-admin-action-dialog-submit class="inline-flex items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#101a32_0%,#1e2c4f_58%,#0b7285_120%)] px-4 py-2.5 text-[13px] font-semibold text-white shadow-[0_18px_32px_rgba(15,23,42,0.16)] transition duration-200 ease-out hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-wait disabled:opacity-70" type="submit" data-loading-label="">确认</button>
-						</div>
-					</form>
+				<div id="admin-action-dialog-content">
+					@DialogLoadingPlaceholder("确认操作", "正在载入操作内容。")
 				</div>
 			</div>
 		</div>
 	</div>
 }
 
-templ SidebarPanel(data LayoutData, mobile bool) {
-	<div class={ joinClasses("relative flex w-full flex-col overflow-hidden rounded-[1.7rem] border border-white/70 bg-white/82 p-4 shadow-[0_22px_60px_rgba(14,31,53,0.08)] backdrop-blur-xl transition-[padding] duration-300 ease-out", ternaryString(mobile, "h-[calc(100vh-1.5rem)] w-[min(15.5rem,calc(100vw-2rem))]", "h-auto")) } x-bind:class={ ternaryString(mobile, "''", "collapsed ? 'px-2.5 py-4' : ''") }>
-		if mobile {
-			<div class="mb-3 flex justify-end">
-				<button
-					type="button"
-					class="inline-flex size-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/82 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] transition duration-200 ease-out hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
-					data-hs-overlay="#admin-sidebar-overlay"
-					aria-controls="admin-sidebar-overlay"
-					aria-label="关闭导航">
-					<span class="sr-only">关闭导航</span>
-					<svg class="size-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-						<path d="m6 6 8 8"></path>
-						<path d="m14 6-8 8"></path>
-					</svg>
-				</button>
-			</div>
-		} else {
-			<div class="mb-3 flex justify-end">
-				<button
-					type="button"
-					class="inline-flex size-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/82 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] transition duration-200 ease-out hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
-					x-on:click="toggle()"
-					x-bind:aria-pressed="collapsed.toString()"
-					aria-label="收起或展开导航">
-					<span class="sr-only">收起或展开导航</span>
-					<svg class="size-4 transition-transform duration-300 ease-out" x-bind:class="collapsed ? 'rotate-180' : ''" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-						<path d="m12.5 5-5 5 5 5"></path>
-					</svg>
-				</button>
-			</div>
-		}
-		<div class="rounded-[1.45rem] border border-white/80 bg-white/72 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] transition-[padding] duration-300 ease-out" x-bind:class={ ternaryString(mobile, "''", "collapsed ? 'px-2.5 py-3' : ''") }>
-			<div class="flex items-start gap-3" x-bind:class={ ternaryString(mobile, "''", "collapsed ? 'justify-center' : ''") }>
+templ SidebarPanel(data LayoutData) {
+	<div class="relative flex h-[calc(100vh-1.5rem)] w-full flex-col overflow-hidden rounded-[1.7rem] border border-white/70 bg-white/82 p-4 shadow-[0_22px_60px_rgba(14,31,53,0.08)] backdrop-blur-xl transition-[padding,width] duration-300 ease-out lg:h-full" x-bind:class="sidebarCollapsed ? 'lg:px-2.5 lg:py-4' : ''">
+		<div class="mb-3 flex justify-between gap-2">
+			<button
+				type="button"
+				class="inline-flex size-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/82 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] transition duration-200 ease-out hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white lg:hidden"
+				data-hs-overlay="#admin-sidebar-overlay"
+				aria-controls="admin-sidebar-overlay"
+				aria-label="关闭导航">
+				<span class="sr-only">关闭导航</span>
+				<svg class="size-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+					<path d="m6 6 8 8"></path>
+					<path d="m14 6-8 8"></path>
+				</svg>
+			</button>
+			<button
+				type="button"
+				class="hidden size-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/82 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] transition duration-200 ease-out hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white lg:inline-flex"
+				@click="sidebarCollapsed = !sidebarCollapsed"
+				x-bind:aria-pressed="sidebarCollapsed.toString()"
+				aria-label="收起或展开导航">
+				<span class="sr-only">收起或展开导航</span>
+				<svg class="size-4 transition-transform duration-300 ease-out" x-bind:class="sidebarCollapsed ? 'rotate-180' : ''" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+					<path d="m12.5 5-5 5 5 5"></path>
+				</svg>
+			</button>
+		</div>
+		<div class="rounded-[1.45rem] border border-white/80 bg-white/72 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] transition-[padding] duration-300 ease-out" x-bind:class="sidebarCollapsed ? 'lg:px-2.5 lg:py-3' : ''">
+			<div class="flex items-start gap-3" x-bind:class="sidebarCollapsed ? 'lg:justify-center' : ''">
 				<div class="inline-flex size-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-r from-teal-100 to-cyan-100 text-sm font-extrabold uppercase tracking-[0.12em] text-teal-700">M</div>
-				<div class="min-w-0" x-cloak x-show={ ternaryString(mobile, "true", "!collapsed") } x-transition.opacity.duration.180ms>
+				<div class="min-w-0 transition-[max-width,opacity,transform] duration-200 ease-out" x-bind:class="sidebarCollapsed ? 'lg:max-w-0 lg:-translate-x-1 lg:overflow-hidden lg:opacity-0' : 'lg:max-w-[12rem] lg:opacity-100'">
 					<div class="inline-flex items-center rounded-full bg-gradient-to-r from-teal-100 to-cyan-100 px-3 py-1 text-[11px] font-extrabold uppercase tracking-[0.12em] text-teal-700">导航</div>
 					<h1 id="admin-sidebar-title" class="mt-3 text-[1.2rem] font-extrabold leading-none tracking-[-0.04em] text-slate-950">页面切换</h1>
 				</div>
@@ -205,25 +130,25 @@ templ SidebarPanel(data LayoutData, mobile bool) {
 		</div>
 		<nav class="mt-4 grid gap-1.5">
 			for _, item := range data.NavItems {
-				<a href={ item.Href } title={ item.Label } class={ navClass(data.CurrentPath, item.Href) } x-bind:class={ ternaryString(mobile, "''", "collapsed ? 'justify-center px-0' : ''") }>
+				<a href={ item.Href } title={ item.Label } class={ navClass(data.CurrentPath, item.Href) } x-bind:class="sidebarCollapsed ? 'lg:justify-center lg:px-0' : ''">
 					<span class="inline-flex size-8 shrink-0 items-center justify-center rounded-2xl bg-white/14 text-current ring-1 ring-current/8">
 						@AdminIcon(navIconName(item.Href), "size-4", "nav-"+navIconName(item.Href))
 					</span>
-					<span x-cloak x-show={ ternaryString(mobile, "true", "!collapsed") } x-transition.opacity.duration.150ms>{ item.Label }</span>
+					<span class="transition-[max-width,opacity,transform] duration-200 ease-out" x-bind:class="sidebarCollapsed ? 'lg:max-w-0 lg:-translate-x-1 lg:overflow-hidden lg:opacity-0' : 'lg:max-w-[9rem] lg:opacity-100'">{ item.Label }</span>
 				</a>
 			}
 		</nav>
 		<div class="mt-5 border-t border-slate-200/70 pt-4">
 			<form method="post" action="/logout">
-				<button title="退出登录" class="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#101a32_0%,#1e2c4f_58%,#0b7285_120%)] px-4 py-3 text-sm font-semibold text-white shadow-[0_18px_32px_rgba(15,23,42,0.16)] transition duration-200 ease-out hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-wait disabled:opacity-70" type="submit" data-loading-label="退出中" x-bind:class={ ternaryString(mobile, "''", "collapsed ? 'px-0' : ''") }>
-					<span class="inline-flex size-5 items-center justify-center shrink-0">
+				<button title="退出登录" class="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#101a32_0%,#1e2c4f_58%,#0b7285_120%)] px-4 py-3 text-sm font-semibold text-white shadow-[0_18px_32px_rgba(15,23,42,0.16)] transition duration-200 ease-out hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-wait disabled:opacity-70" type="submit" data-loading-label="退出中" x-bind:class="sidebarCollapsed ? 'lg:px-0' : ''">
+					<span class="inline-flex size-5 shrink-0 items-center justify-center">
 						<svg class="size-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 							<path d="M7 4.75H5.75A1.75 1.75 0 0 0 4 6.5v7a1.75 1.75 0 0 0 1.75 1.75H7"></path>
 							<path d="M11 6.5 14.5 10 11 13.5"></path>
 							<path d="M8 10h6.5"></path>
 						</svg>
 					</span>
-					<span x-cloak x-show={ ternaryString(mobile, "true", "!collapsed") } x-transition.opacity.duration.150ms>退出登录</span>
+					<span class="transition-[max-width,opacity,transform] duration-200 ease-out" x-bind:class="sidebarCollapsed ? 'lg:max-w-0 lg:-translate-x-1 lg:overflow-hidden lg:opacity-0' : 'lg:max-w-[9rem] lg:opacity-100'">退出登录</span>
 				</button>
 			</form>
 		</div>
@@ -319,14 +244,14 @@ templ ChoiceFilterGroup(name string, formID string, current string, options []Fi
 	<div data-admin-choice-group={ name } class="flex flex-wrap items-center gap-2 sm:justify-end">
 		for _, option := range options {
 			<label class={ filterChoiceClass(equalTrimmed(option.Value, current)) }>
-				<input class="sr-only" type="radio" name={ name } form={ formID } value={ option.Value } checked?={ equalTrimmed(option.Value, current) } onchange="window.adminSubmitChoiceFilter && window.adminSubmitChoiceFilter(this)"/>
+				<input class="sr-only" type="radio" name={ name } form={ formID } value={ option.Value } checked?={ equalTrimmed(option.Value, current) }/>
 				<span>{ option.Label }</span>
 			</label>
 		}
 	</div>
 }
 
-templ FilterAccordion(id string, title string, summary string, controls templ.Component, hasControls bool, content templ.Component) {
+templ FilterPanel(id string, title string, summary string, controls templ.Component, hasControls bool, content templ.Component) {
 	<div id={ id } class="overflow-hidden rounded-[1.45rem] border border-slate-200/80 bg-white/78 shadow-[0_18px_45px_rgba(14,31,53,0.05)] backdrop-blur-xl motion-safe:animate-[admin-fade-up_220ms_ease-out]">
 		<div class={ joinClasses("flex flex-col gap-4 px-4 pt-4 sm:px-5 sm:pt-5", ternaryString(hasControls, "lg:flex-row lg:items-start lg:justify-between", "")) }>
 			<div class="min-w-0">
@@ -352,60 +277,32 @@ templ FilterAccordion(id string, title string, summary string, controls templ.Co
 	</div>
 }
 
-templ DetailAccordion(id string, title string, summary string, open bool, content templ.Component) {
-	<div class="hs-accordion-group">
-		<div id={ id } class={ joinClasses("hs-accordion overflow-hidden rounded-[1.5rem] border border-slate-200/80 bg-white/78 shadow-[0_18px_45px_rgba(14,31,53,0.05)] backdrop-blur-xl", ternaryString(open, "active", "")) }>
-			<button id={ id + "-toggle" } class="hs-accordion-toggle flex w-full items-start justify-between gap-4 px-4 py-3 text-left" type="button" aria-controls={ id + "-content" } aria-expanded={ boolAttrText(open) }>
-				<div class="min-w-0">
-					<div class="text-sm font-bold tracking-[-0.02em] text-slate-900">{ title }</div>
-					if summary != "" {
-						<div class="mt-1 text-sm leading-6 text-slate-500">{ summary }</div>
-					}
-				</div>
-				<div class="flex size-8 shrink-0 items-center justify-center rounded-full bg-slate-950/5 text-slate-500 transition hs-accordion-active:rotate-180 hs-accordion-active:bg-teal-100 hs-accordion-active:text-teal-700">
-					<svg class="size-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-						<path d="m6 8 4 4 4-4"></path>
-					</svg>
-				</div>
-			</button>
-			<div id={ id + "-content" } class={ joinClasses("hs-accordion-content w-full overflow-hidden transition-[height] duration-300 ease-out", ternaryString(open, "", "hidden")) } role="region" aria-labelledby={ id + "-toggle" }>
-				<div class="border-t border-slate-200/60 px-4 pb-4 pt-3">
-					@content
-				</div>
+templ DialogLoadingPlaceholder(title string, summary string) {
+	<div class="space-y-5">
+		<div class="flex items-start justify-between gap-4">
+			<div class="min-w-0">
+				<h3 id="admin-action-dialog-title" class="text-xl font-extrabold tracking-[-0.03em] text-slate-950">{ title }</h3>
+				if summary != "" {
+					<div class="mt-2 text-sm leading-7 text-slate-600">{ summary }</div>
+				}
 			</div>
+			<button
+				type="button"
+				class="inline-flex size-10 shrink-0 items-center justify-center rounded-full border border-slate-200/80 bg-white/82 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] transition duration-200 ease-out hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+				data-hs-overlay="#admin-action-dialog"
+				aria-label="关闭弹层">
+				<span class="sr-only">关闭弹层</span>
+				<svg class="size-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+					<path d="m6 6 8 8"></path>
+					<path d="m14 6-8 8"></path>
+				</svg>
+			</button>
 		</div>
-	</div>
-}
-
-templ OverlayDialog(id string, title string, body string, wide bool, content templ.Component) {
-	<div id={ id } class="hs-overlay hidden fixed inset-0 z-[100] overflow-y-auto bg-transparent px-4 py-6 opacity-0 transition-opacity duration-200 ease-out hs-overlay-open:opacity-100 sm:px-6 sm:py-8 [--overlay-backdrop:false]" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby={ id + "-title" } data-admin-overlay="dialog">
-		<div class="flex min-h-[calc(100dvh-3rem)] items-center justify-center sm:min-h-[calc(100dvh-4rem)]">
-			<div class={ joinClasses(
-				"hs-overlay-animation-target relative my-auto max-h-[calc(100dvh-3rem)] w-full max-w-[calc(100vw-2rem)] translate-y-3 scale-[0.985] overflow-y-auto rounded-[2rem] border border-white/80 bg-white/98 p-6 opacity-0 shadow-[0_34px_110px_rgba(8,17,31,0.2),0_14px_36px_rgba(8,17,31,0.1)] transition duration-200 ease-out hs-overlay-open:translate-y-0 hs-overlay-open:scale-100 hs-overlay-open:opacity-100 sm:max-h-[calc(100dvh-4rem)] sm:p-7",
-				ternaryString(wide, "max-w-4xl", "max-w-xl"),
-			) }>
-				<div class="flex items-start justify-between gap-4">
-					<div class="min-w-0">
-						<h3 id={ id + "-title" } class="text-xl font-extrabold tracking-[-0.03em] text-slate-950">{ title }</h3>
-						if body != "" {
-							<div class="mt-2 text-sm leading-7 text-slate-600">{ body }</div>
-						}
-					</div>
-					<button
-						type="button"
-						class="inline-flex size-10 shrink-0 items-center justify-center rounded-full border border-slate-200/80 bg-white/82 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] transition duration-200 ease-out hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
-						data-hs-overlay={ "#" + id }
-						aria-label="关闭弹层">
-						<span class="sr-only">关闭弹层</span>
-						<svg class="size-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-							<path d="m6 6 8 8"></path>
-							<path d="m14 6-8 8"></path>
-						</svg>
-					</button>
-				</div>
-				<div class="mt-5">
-					@content
-				</div>
+		<div class="grid gap-3">
+			<div class="h-24 rounded-[1.4rem] bg-slate-100/80"></div>
+			<div class="grid gap-3 sm:grid-cols-2">
+				<div class="h-24 rounded-[1.25rem] bg-slate-100/75"></div>
+				<div class="h-24 rounded-[1.25rem] bg-slate-100/75"></div>
 			</div>
 		</div>
 	</div>

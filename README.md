@@ -82,11 +82,12 @@ cp config/mcp.example.json config/mcp.json
 
 # 2. 编辑配置（填入 LLM API Key、数据库信息等）
 # 也可通过环境变量配置敏感信息：
-#   MUMU_LLM_API_KEY        - LLM API Key
-#   MUMU_AUX_LLM_API_KEY    - 辅助模型 API Key（可选，用于后台学习任务，默认复用 LLM）
-#   MUMU_EMBEDDING_API_KEY  - Embedding 模型 API Key（可选，默认复用 LLM）
-#   MUMU_VISION_API_KEY     - 视觉模型 API Key（可选，默认复用 LLM）
-#   MUMU_MYSQL_PASSWORD     - MySQL 密码
+#   MUMU_LLM_API_KEY                    - LLM API Key
+#   MUMU_AUX_LLM_API_KEY                - 辅助模型 API Key（用于后台学习任务）
+#   MUMU_STYLE_CLASSIFICATION_API_KEY   - 风格分类模型 API Key
+#   MUMU_EMBEDDING_API_KEY              - Embedding 模型 API Key
+#   MUMU_VISION_API_KEY                 - 视觉模型 API Key
+#   MUMU_MYSQL_PASSWORD                 - MySQL 密码
 
 # 3. 启动
 ./mumu-bot
