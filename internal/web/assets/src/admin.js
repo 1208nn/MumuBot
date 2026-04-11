@@ -167,7 +167,7 @@ function buildToastNode(detail) {
   wrapper.setAttribute("aria-atomic", "true");
   wrapper.innerHTML = `
     <div class="admin-toast__icon">${toastIcon(kind)}</div>
-    <div class="min-w-0 flex-1">
+    <div class="admin-toast__content">
       <div data-admin-toast-title class="text-[15px] font-extrabold leading-6 tracking-[-0.01em] text-slate-950"></div>
       <div class="admin-toast__body text-sm leading-6 text-slate-600"></div>
     </div>
