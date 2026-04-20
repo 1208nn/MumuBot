@@ -228,11 +228,11 @@ templ ListFooter(meta ListMeta) {
 	</div>
 }
 
-templ ChoiceFilterGroup(name string, formID string, current string, options []FilterChoice) {
+templ ChoiceFilterGroup(name string, current string, options []FilterChoice) {
 	<div data-admin-choice-group={ name } class="flex flex-wrap items-center gap-2 sm:justify-end">
 		for _, option := range options {
 			<label class={ filterChoiceClass(equalTrimmed(option.Value, current)) }>
-				<input class="sr-only" type="radio" name={ name } form={ formID } value={ option.Value } checked?={ equalTrimmed(option.Value, current) }/>
+				<input class="sr-only" type="radio" name={ name } value={ option.Value } checked?={ equalTrimmed(option.Value, current) }/>
 				<span>{ option.Label }</span>
 			</label>
 		}

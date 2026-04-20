@@ -15,12 +15,7 @@ templ StyleCardListBody(data StyleCardListPageData) {
 	<div class="space-y-6">
 		@PageHeader("风格卡片", "查看示例、场景和使用情况，处理不合适的风格卡片。", "风格审核")
 		<div class="space-y-4 rounded-[1.7rem] border border-white/70 bg-white/82 p-4 shadow-[0_22px_60px_rgba(14,31,53,0.08)] backdrop-blur-xl motion-safe:animate-[admin-fade-up_220ms_ease-out] sm:p-5">
-			@FilterPanel("style-card-filters", "筛选条件", "先按群号或关键词缩小范围，再处理需要调整的风格卡片。", ChoiceFilterGroup("status", "style-card-filter-form", data.Status, []FilterChoice{
-				{Label: "全部状态", Value: ""},
-				{Label: "候选", Value: "candidate"},
-				{Label: "已启用", Value: "active"},
-				{Label: "已拒绝", Value: "rejected"},
-			}), true, StyleCardFilterForm(data))
+			@FilterPanel("style-card-filters", "筛选条件", "先按群号或关键词缩小范围，再处理需要调整的风格卡片。", EmptyComponent(), false, StyleCardFilterForm(data))
 			@SortToolbar(data.Sort)
 			<div class="space-y-4">
 				if len(data.Items) == 0 {
@@ -85,12 +80,20 @@ templ StyleCardListBody(data StyleCardListPageData) {
 }
 
 templ StyleCardFilterForm(data StyleCardListPageData) {
-	<form id="style-card-filter-form" class="grid gap-2.5 xl:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] xl:items-center" method="get" action="/admin/style-cards" hx-get="/admin/style-cards" hx-trigger="change from:input[type='radio'], submit" hx-target="#admin-page-body" hx-swap="outerHTML" hx-push-url="true">
+	<form id="style-card-filter-form" class="space-y-3" method="get" action="/admin/style-cards" hx-get="/admin/style-cards" hx-trigger="change from:input[type='radio'], submit" hx-target="#admin-page-body" hx-swap="outerHTML" hx-push-url="true">
+		@ChoiceFilterGroup("status", data.Status, []FilterChoice{
+			{Label: "全部状态", Value: ""},
+			{Label: "候选", Value: "candidate"},
+			{Label: "已启用", Value: "active"},
+			{Label: "已拒绝", Value: "rejected"},
+		})
+		<div class="grid gap-2.5 xl:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] xl:items-center">
 		<input type="hidden" name="sort" value={ data.Sort.CurrentSort }/>
 		<input type="hidden" name="order" value={ data.Sort.CurrentOrder }/>
 		<input class="block w-full min-w-0 rounded-2xl border-slate-200/80 bg-white/90 px-4 py-2.5 text-sm text-slate-800 shadow-none placeholder:text-slate-400 focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100" type="text" name="group_id" value={ data.GroupID } placeholder="群号"/>
 		<input class="block w-full min-w-0 rounded-2xl border-slate-200/80 bg-white/90 px-4 py-2.5 text-sm text-slate-800 shadow-none placeholder:text-slate-400 focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100" type="text" name="keyword" value={ data.Keyword } placeholder="示例、场景、意图、语气"/>
 		<button class="inline-flex items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#101a32_0%,#1e2c4f_58%,#0b7285_120%)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_18px_32px_rgba(15,23,42,0.16)] transition duration-200 ease-out hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-wait disabled:opacity-70 xl:min-w-28" type="submit" data-loading-label="筛选中">筛选</button>
+		</div>
 	</form>
 }
 
@@ -107,12 +110,7 @@ templ JargonListBody(data JargonListPageData) {
 	<div class="space-y-6">
 		@PageHeader("黑话", "筛选、查看并更新术语状态。", "黑话审核")
 		<div class="space-y-4 rounded-[1.7rem] border border-white/70 bg-white/82 p-4 shadow-[0_22px_60px_rgba(14,31,53,0.08)] backdrop-blur-xl motion-safe:animate-[admin-fade-up_220ms_ease-out] sm:p-5">
-			@FilterPanel("jargon-filters", "筛选条件", "先按群号或关键词缩小范围，再处理需要关注的术语。", ChoiceFilterGroup("status", "jargon-filter-form", data.Status, []FilterChoice{
-				{Label: "全部状态", Value: ""},
-				{Label: "待审核", Value: "pending"},
-				{Label: "已通过", Value: "approved"},
-				{Label: "已拒绝", Value: "rejected"},
-			}), true, JargonFilterForm(data))
+			@FilterPanel("jargon-filters", "筛选条件", "先按群号或关键词缩小范围，再处理需要关注的术语。", EmptyComponent(), false, JargonFilterForm(data))
 			@SortToolbar(data.Sort)
 			<div class="space-y-4">
 				if len(data.Items) == 0 {
@@ -154,11 +152,19 @@ templ JargonListBody(data JargonListPageData) {
 }
 
 templ JargonFilterForm(data JargonListPageData) {
-	<form id="jargon-filter-form" class="grid gap-2.5 xl:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] xl:items-center" method="get" action="/admin/jargons" hx-get="/admin/jargons" hx-trigger="change from:input[type='radio'], submit" hx-target="#admin-page-body" hx-swap="outerHTML" hx-push-url="true">
+	<form id="jargon-filter-form" class="space-y-3" method="get" action="/admin/jargons" hx-get="/admin/jargons" hx-trigger="change from:input[type='radio'], submit" hx-target="#admin-page-body" hx-swap="outerHTML" hx-push-url="true">
+		@ChoiceFilterGroup("status", data.Status, []FilterChoice{
+			{Label: "全部状态", Value: ""},
+			{Label: "待审核", Value: "pending"},
+			{Label: "已通过", Value: "approved"},
+			{Label: "已拒绝", Value: "rejected"},
+		})
+		<div class="grid gap-2.5 xl:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto] xl:items-center">
 		<input type="hidden" name="sort" value={ data.Sort.CurrentSort }/>
 		<input type="hidden" name="order" value={ data.Sort.CurrentOrder }/>
 		<input class="block w-full min-w-0 rounded-2xl border-slate-200/80 bg-white/90 px-4 py-2.5 text-sm text-slate-800 shadow-none placeholder:text-slate-400 focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100" type="text" name="group_id" value={ data.GroupID } placeholder="群号"/>
 		<input class="block w-full min-w-0 rounded-2xl border-slate-200/80 bg-white/90 px-4 py-2.5 text-sm text-slate-800 shadow-none placeholder:text-slate-400 focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100" type="text" name="keyword" value={ data.Keyword } placeholder="术语、释义、上下文"/>
 		<button class="inline-flex items-center justify-center gap-2 rounded-2xl bg-[linear-gradient(135deg,#101a32_0%,#1e2c4f_58%,#0b7285_120%)] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_18px_32px_rgba(15,23,42,0.16)] transition duration-200 ease-out hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-wait disabled:opacity-70 xl:min-w-28" type="submit" data-loading-label="筛选中">筛选</button>
+		</div>
 	</form>
 }
