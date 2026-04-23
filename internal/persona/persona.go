@@ -23,6 +23,7 @@ type PromptContext struct {
 	MoodState             *MoodInfo         // 当前情绪状态
 	JargonMatches         map[string]string // 匹配到的黑话/梗
 	GroupInfo             string
+	TopicMemory           string
 	RelatedMemories       []memory.Memory // 当前群相关记忆
 	CrossGroupExperiences []memory.Memory // 跨群自我经历
 	StyleHints            []string
@@ -118,6 +119,10 @@ func (p *Persona) GetThinkPrompt(ctx *PromptContext, chatContext string, groupEx
 
 	if ctx != nil && ctx.GroupInfo != "" {
 		b.WriteString(fmt.Sprintf("\n## 当前群信息\n%s\n", ctx.GroupInfo))
+	}
+
+	if ctx != nil && ctx.TopicMemory != "" {
+		b.WriteString(fmt.Sprintf("\n## 当前话题工作记忆\n%s\n", ctx.TopicMemory))
 	}
 
 	// 群特殊说明

@@ -28,6 +28,7 @@ import (
 	flowagent "github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
+	"github.com/jellydator/ttlcache/v3"
 	"go.uber.org/zap"
 )
 
@@ -58,8 +59,9 @@ type Agent struct {
 	jargonMgr *jargon.Manager   // 黑话管理器
 	learner   *learning.Learner // 后台学习系统
 
-	replyCache  *utils.TTLCache[int64, onebot.ReplyInfo]
-	visionCache *utils.TTLCache[string, string]
+	replyCache  *ttlcache.Cache[int64, onebot.ReplyInfo]
+	visionCache *ttlcache.Cache[string, string]
+	topicMgr    *TopicManager
 
 	// 消息缓冲（使用 ring buffer 避免扩容缩容开销）
 	buffers   map[int64]*utils.RingBuffer[*onebot.GroupMessage]
@@ -73,6 +75,9 @@ type Agent struct {
 	processing        map[int64]bool
 	lastProcessedTime map[int64]time.Time
 	processingMu      sync.RWMutex
+	startupMu         sync.Mutex
+	startupRecovering bool
+	startupQueue      []*onebot.GroupMessage
 
 	wg sync.WaitGroup
 }
@@ -109,9 +114,6 @@ func New(mem *memory.Manager) (*Agent, error) {
 	}
 
 	botClient := onebot.NewClient()
-	if err := botClient.Connect(); err != nil {
-		return nil, fmt.Errorf("OneBot 连接失败: %w", err)
-	}
 
 	rootCtx, cancel := context.WithCancel(context.Background())
 	a := &Agent{
@@ -126,9 +128,17 @@ func New(mem *memory.Manager) (*Agent, error) {
 		pendingThinks:     make(map[int64]*pendingThink),
 		processing:        make(map[int64]bool),
 		lastProcessedTime: make(map[int64]time.Time),
-		replyCache:        utils.NewTTLCache[int64, onebot.ReplyInfo](replyCacheCapacity, replyCacheTTL),
-		visionCache:       utils.NewTTLCache[string, string](visionCacheCapacity, visionCacheTTL),
+		replyCache:        newAgentTTLCache[int64, onebot.ReplyInfo](replyCacheCapacity, replyCacheTTL),
+		visionCache:       newAgentTTLCache[string, string](visionCacheCapacity, visionCacheTTL),
 	}
+	a.topicMgr = NewTopicManager(rootCtx, mem, chatModel)
+	constructed := false
+	defer func() {
+		if constructed {
+			return
+		}
+		a.cleanupAfterInitFailure()
+	}()
 
 	zap.L().Info("人格已加载", zap.String("name", a.persona.GetName()))
 
@@ -155,20 +165,17 @@ func New(mem *memory.Manager) (*Agent, error) {
 	}
 
 	if err := a.initTools(); err != nil {
-		a.bot.Close()
-		a.cancel()
 		return nil, err
 	}
 	if err := a.initReact(); err != nil {
-		a.bot.Close()
-		a.cancel()
 		return nil, err
 	}
 	if err := a.initStyleClassifier(); err != nil {
-		a.bot.Close()
-		a.cancel()
 		return nil, err
 	}
+	go a.replyCache.Start()
+	go a.visionCache.Start()
+	constructed = true
 	return a, nil
 }
 
@@ -288,10 +295,28 @@ func (a *Agent) Start() {
 		a.learner.Start(a.ctx)
 	}
 
+	a.startupMu.Lock()
+	a.startupRecovering = true
+	a.startupQueue = nil
+	a.startupMu.Unlock()
+
+	a.bot.OnMessage(a.handleIncomingMessage)
+	if err := a.bot.Connect(); err != nil {
+		zap.L().Fatal("OneBot 连接失败", zap.Error(err))
+	}
+
 	// 启动时从数据库加载历史消息到缓冲区
 	a.loadBuffersFromDB()
-
-	a.bot.OnMessage(a.onMessage)
+	groupIDs := make([]int64, 0, len(config.Get().Groups))
+	for _, group := range config.Get().Groups {
+		if group.Enabled {
+			groupIDs = append(groupIDs, group.GroupID)
+		}
+	}
+	if err := a.topicMgr.LoadFromDB(groupIDs); err != nil {
+		zap.L().Fatal("加载话题工作记忆失败", zap.Error(err))
+	}
+	a.drainStartupMessages()
 	a.wg.Add(1)
 	go a.thinkLoop()
 	zap.L().Info("Agent 已启动")
@@ -352,10 +377,41 @@ func (a *Agent) loadBuffersFromDB() {
 	}
 }
 
+func (a *Agent) handleIncomingMessage(msg *onebot.GroupMessage) {
+	a.startupMu.Lock()
+	if a.startupRecovering {
+		a.startupQueue = append(a.startupQueue, cloneGroupMessage(msg))
+		a.startupMu.Unlock()
+		return
+	}
+	a.startupMu.Unlock()
+
+	a.onMessage(msg)
+}
+
+func (a *Agent) drainStartupMessages() {
+	for {
+		a.startupMu.Lock()
+		if len(a.startupQueue) == 0 {
+			a.startupRecovering = false
+			a.startupMu.Unlock()
+			return
+		}
+		pending := a.startupQueue
+		a.startupQueue = nil
+		a.startupMu.Unlock()
+
+		for _, msg := range pending {
+			a.onMessage(msg)
+		}
+	}
+}
+
 // Stop 停止
 func (a *Agent) Stop() {
 	a.cancel()
 	a.clearPendingThinks()
+	a.stopCaches()
 	if a.bot != nil {
 		_ = a.bot.Close()
 	}
@@ -364,6 +420,9 @@ func (a *Agent) Stop() {
 	}
 	if a.concurrencyMgr != nil {
 		a.concurrencyMgr.Close()
+	}
+	if a.topicMgr != nil {
+		a.topicMgr.Close()
 	}
 	a.wg.Wait()
 	// 关闭 MCP 连接
@@ -382,6 +441,43 @@ func (a *Agent) BotSelfID() int64 {
 		return 0
 	}
 	return a.bot.GetSelfID()
+}
+
+func newAgentTTLCache[K comparable, V any](capacity int, ttl time.Duration) *ttlcache.Cache[K, V] {
+	return ttlcache.New[K, V](
+		ttlcache.WithTTL[K, V](ttl),
+		ttlcache.WithCapacity[K, V](uint64(capacity)),
+		ttlcache.WithDisableTouchOnHit[K, V](),
+	)
+}
+
+func (a *Agent) stopCaches() {
+	if a.replyCache != nil {
+		a.replyCache.Stop()
+	}
+	if a.visionCache != nil {
+		a.visionCache.Stop()
+	}
+}
+
+func (a *Agent) cleanupAfterInitFailure() {
+	a.cancel()
+	a.stopCaches()
+	if a.bot != nil {
+		_ = a.bot.Close()
+	}
+	if a.learner != nil {
+		a.learner.Stop()
+	}
+	if a.concurrencyMgr != nil {
+		a.concurrencyMgr.Close()
+	}
+	if a.topicMgr != nil {
+		a.topicMgr.Close()
+	}
+	if a.mcpMgr != nil {
+		a.mcpMgr.Close()
+	}
 }
 
 func (a *Agent) MCPToolCount() int {
@@ -424,27 +520,25 @@ func (a *Agent) onMessage(msg *onebot.GroupMessage) {
 
 	// 解析消息内容（图片、视频、表情、回复等）
 	parsedContent := a.parseMessageContent(msg)
-	msg.FinalContent = parsedContent
 
 	// 防止注入工具名字
 	for _, t := range a.tools {
 		info, _ := t.Info(a.ctx)
 		parsedContent = strings.ReplaceAll(parsedContent, info.Name, "\"危险指令，已屏蔽\"")
 	}
+	msg.FinalContent = parsedContent
+
+	_, persistErr := a.topicMgr.PersistMessage(a.ctx, PersistMessageInput{
+		Message:      msg,
+		IsMentioned:  isMentioned,
+		ForwardsJSON: forwardsJSON,
+	})
+	if persistErr != nil {
+		zap.L().Error("写入话题工作记忆失败", zap.Int64("group_id", msg.GroupID), zap.Int64("message_id", msg.MessageID), zap.Error(persistErr))
+		return
+	}
 
 	a.addBuffer(msg)
-	_ = a.memory.AddMessage(memory.MessageLog{
-		MessageID:       fmt.Sprintf("%d", msg.MessageID),
-		GroupID:         msg.GroupID,
-		UserID:          msg.UserID,
-		Nickname:        msg.Nickname,
-		Content:         msg.FinalContent, // 使用解析后的内容
-		OriginalContent: msg.Content,
-		MsgType:         msg.MessageType,
-		IsMentioned:     isMentioned,
-		CreatedAt:       msg.Time,
-		Forwards:        forwardsJSON,
-	})
 
 	if msg.UserID == a.bot.GetSelfID() {
 		return
@@ -467,13 +561,13 @@ func (a *Agent) resolveReplyInfo(msg *onebot.GroupMessage) error {
 		return nil
 	}
 	if msg.Reply.Content != "" && msg.Reply.SenderID != 0 {
-		a.replyCache.Set(msg.Reply.MessageID, *msg.Reply)
+		a.replyCache.Set(msg.Reply.MessageID, *msg.Reply, ttlcache.DefaultTTL)
 		return nil
 	}
 
 	if reply := findReplyInfoInMessages(a.getBuffer(msg.GroupID), msg.Reply.MessageID); reply != nil {
 		msg.Reply = reply
-		a.replyCache.Set(reply.MessageID, *reply)
+		a.replyCache.Set(reply.MessageID, *reply, ttlcache.DefaultTTL)
 		return nil
 	}
 
@@ -481,13 +575,13 @@ func (a *Agent) resolveReplyInfo(msg *onebot.GroupMessage) error {
 	if err == nil {
 		if reply := replyInfoFromMessageLog(log); reply != nil {
 			msg.Reply = reply
-			a.replyCache.Set(reply.MessageID, *reply)
+			a.replyCache.Set(reply.MessageID, *reply, ttlcache.DefaultTTL)
 			return nil
 		}
 	}
 
-	if cached, ok := a.replyCache.Get(msg.Reply.MessageID); ok {
-		msg.Reply = cloneReplyInfo(cached)
+	if cached := a.replyCache.Get(msg.Reply.MessageID); cached != nil {
+		msg.Reply = cloneReplyInfo(cached.Value())
 		return nil
 	}
 
@@ -497,7 +591,7 @@ func (a *Agent) resolveReplyInfo(msg *onebot.GroupMessage) error {
 	}
 	if reply != nil {
 		msg.Reply = reply
-		a.replyCache.Set(reply.MessageID, *reply)
+		a.replyCache.Set(reply.MessageID, *reply, ttlcache.DefaultTTL)
 	}
 	return nil
 }
@@ -552,14 +646,14 @@ func (a *Agent) describeImageCached(ctx context.Context, img onebot.ImageInfo) (
 
 	cacheKey := visionCacheKey("image", img.URL, img.File)
 	if cacheKey != "" {
-		if cached, ok := a.visionCache.Get(cacheKey); ok {
-			return cached, nil
+		if cached := a.visionCache.Get(cacheKey); cached != nil {
+			return cached.Value(), nil
 		}
 	}
 
 	desc, err := a.vision.DescribeImage(ctx, img.URL)
 	if err == nil && cacheKey != "" && strings.TrimSpace(desc) != "" {
-		a.visionCache.Set(cacheKey, desc)
+		a.visionCache.Set(cacheKey, desc, ttlcache.DefaultTTL)
 	}
 	return desc, err
 }
@@ -571,14 +665,14 @@ func (a *Agent) describeVideoCached(ctx context.Context, vid onebot.VideoInfo) (
 
 	cacheKey := visionCacheKey("video", vid.URL, vid.File)
 	if cacheKey != "" {
-		if cached, ok := a.visionCache.Get(cacheKey); ok {
-			return cached, nil
+		if cached := a.visionCache.Get(cacheKey); cached != nil {
+			return cached.Value(), nil
 		}
 	}
 
 	desc, err := a.vision.DescribeVideo(ctx, vid.URL)
 	if err == nil && cacheKey != "" && strings.TrimSpace(desc) != "" {
-		a.visionCache.Set(cacheKey, desc)
+		a.visionCache.Set(cacheKey, desc, ttlcache.DefaultTTL)
 	}
 	return desc, err
 }
@@ -973,9 +1067,16 @@ func (a *Agent) think(groupID int64, isMention bool) {
 	}
 	promptCtx.GroupInfo = a.buildGroupContext(groupID)
 
+	topicPromptCtx, err := a.topicMgr.BuildPromptContext(ctx, groupID, a.getBuffer(groupID))
+	if err != nil {
+		zap.L().Warn("构建话题工作记忆失败", zap.Int64("group_id", groupID), zap.Error(err))
+	} else {
+		promptCtx.TopicMemory = topicPromptCtx.Prompt
+	}
+
 	// 主动记忆检索
 	if config.Get().Agent.EnableActiveRetrieval {
-		promptCtx.RelatedMemories, promptCtx.CrossGroupExperiences = a.buildMemoryContext(ctx, groupID)
+		promptCtx.RelatedMemories, promptCtx.CrossGroupExperiences = a.buildMemoryContext(ctx, groupID, topicPromptCtx.RetrievalQuery)
 	}
 
 	// 获取当前情绪状态
@@ -1079,13 +1180,8 @@ func (a *Agent) buildGroupContext(groupID int64) string {
 	return strings.Join(parts, "\n")
 }
 
-func (a *Agent) buildMemoryContext(ctx context.Context, groupID int64) ([]memory.Memory, []memory.Memory) {
-	msgs := a.getBuffer(groupID)
-	if len(msgs) == 0 {
-		return nil, nil
-	}
-
-	query := collectTextContext(msgs)
+func (a *Agent) buildMemoryContext(ctx context.Context, groupID int64, query string) ([]memory.Memory, []memory.Memory) {
+	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, nil
 	}

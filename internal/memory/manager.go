@@ -35,6 +35,7 @@ type Manager struct {
 	embedding       EmbeddingProvider
 	milvus          vectorStore // Memory 向量存储
 	styleCardMilvus vectorStore // StyleCard 向量存储
+	topicMilvus     vectorStore // Topic 摘要向量存储
 	cleanupStop     chan struct{}
 }
 
@@ -77,6 +78,7 @@ func NewManager(embedding EmbeddingProvider) (*Manager, error) {
 		&StyleCard{},
 		&Jargon{},
 		&MessageLog{},
+		&TopicThread{},
 		&Sticker{},
 		&MoodState{},
 		&LearningState{},
@@ -109,15 +111,31 @@ func NewManager(embedding EmbeddingProvider) (*Manager, error) {
 		return nil, fmt.Errorf("连接风格卡片 Milvus 失败: %w", err)
 	}
 
+	topicMilvusCfg := &vector.MilvusConfig{
+		Address:        cfg.Memory.Milvus.Address,
+		DBName:         cfg.Memory.Milvus.DBName,
+		CollectionName: topicSummaryCollectionName(cfg.Memory.Milvus.CollectionName),
+		VectorDim:      cfg.Memory.Milvus.VectorDim,
+		MetricType:     cfg.Memory.Milvus.MetricType,
+	}
+	topicMilvusClient, err := vector.NewMilvusClient(topicMilvusCfg)
+	if err != nil {
+		_ = styleMilvusClient.Close()
+		_ = milvusClient.Close()
+		return nil, fmt.Errorf("连接话题摘要 Milvus 失败: %w", err)
+	}
+
 	zap.L().Info("Milvus 向量存储已连接",
 		zap.String("memory_collection", milvusCfg.CollectionName),
-		zap.String("style_card_collection", styleMilvusCfg.CollectionName))
+		zap.String("style_card_collection", styleMilvusCfg.CollectionName),
+		zap.String("topic_summary_collection", topicMilvusCfg.CollectionName))
 
 	m := &Manager{
 		db:              db,
 		embedding:       embedding,
 		milvus:          milvusClient,
 		styleCardMilvus: styleMilvusClient,
+		topicMilvus:     topicMilvusClient,
 		cleanupStop:     make(chan struct{}),
 	}
 
@@ -354,12 +372,8 @@ func (m *Manager) cleanupMessageLogs(keepLatest int) {
 	}
 
 	for _, groupID := range groupIDs {
-		var keepIDs []uint
-		if err := m.db.Model(&MessageLog{}).
-			Where("group_id = ?", groupID).
-			Order("created_at DESC").
-			Limit(keepLatest).
-			Pluck("id", &keepIDs).Error; err != nil {
+		keepIDs, err := m.protectedTopicMessageIDs(groupID, keepLatest)
+		if err != nil {
 			zap.L().Warn("清理消息日志失败：获取保留ID失败", zap.Int64("group_id", groupID), zap.Error(err))
 			continue
 		}
@@ -935,6 +949,9 @@ func (m *Manager) Close() error {
 	}
 	if m.styleCardMilvus != nil {
 		_ = m.styleCardMilvus.Close()
+	}
+	if m.topicMilvus != nil {
+		_ = m.topicMilvus.Close()
 	}
 	// 关闭 MySQL 连接
 	if sqlDB, err := m.db.DB(); err == nil {

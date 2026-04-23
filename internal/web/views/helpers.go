@@ -17,6 +17,7 @@ func NavItems() []NavItem {
 		{Label: "风格卡片", Href: "/admin/style-cards"},
 		{Label: "黑话", Href: "/admin/jargons"},
 		{Label: "表情包", Href: "/admin/stickers"},
+		{Label: "话题", Href: "/admin/topics"},
 		{Label: "记忆", Href: "/admin/memories"},
 		{Label: "成员", Href: "/admin/members"},
 		{Label: "系统", Href: "/admin/system"},
@@ -45,7 +46,11 @@ func joinClasses(parts ...string) string {
 
 func navClass(currentPath string, href string) string {
 	base := "group inline-flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-sm font-semibold transition duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
-	if currentPath == href {
+	active := currentPath == href
+	if !active && href != "" && href != "/admin" && strings.HasPrefix(currentPath, href+"/") {
+		active = true
+	}
+	if active {
 		return joinClasses(base, "bg-[linear-gradient(135deg,#101a32_0%,#1e2c4f_58%,#0b7285_120%)] text-white shadow-[0_20px_36px_rgba(15,23,42,0.18)]")
 	}
 	return joinClasses(base, "text-slate-600 hover:bg-white/90 hover:text-slate-900")
@@ -87,6 +92,8 @@ func navIconName(href string) string {
 		return "jargons"
 	case "/admin/stickers":
 		return "stickers"
+	case "/admin/topics":
+		return "memories"
 	case "/admin/memories":
 		return "memories"
 	case "/admin/members":
@@ -224,6 +231,92 @@ func formatTime(ts time.Time) string {
 	return ts.Format("2006-01-02 15:04")
 }
 
+func topicStatusText(status memory.TopicThreadStatus) string {
+	switch status {
+	case memory.TopicThreadStatusArchived:
+		return "已归档"
+	default:
+		return "进行中"
+	}
+}
+
+func topicStatusClass(status memory.TopicThreadStatus) string {
+	switch status {
+	case memory.TopicThreadStatusArchived:
+		return "inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200"
+	default:
+		return "inline-flex items-center rounded-full bg-cyan-100 px-3 py-1 text-xs font-semibold text-cyan-700 ring-1 ring-cyan-200"
+	}
+}
+
+func topicSummary(topic memory.TopicThread) memory.TopicSummaryV1 {
+	return memory.ParseTopicSummary(topic.SummaryJSON)
+}
+
+func topicSummaryHistory(topic memory.TopicThread) []memory.TopicSummarySnapshot {
+	return memory.ParseTopicSummaryHistory(topic.SummaryHistoryJSON)
+}
+
+func topicTitle(topic memory.TopicThread) string {
+	title := strings.TrimSpace(topicSummary(topic).Title)
+	if title != "" {
+		return title
+	}
+	return fmt.Sprintf("话题 #%d", topic.ID)
+}
+
+func topicGist(topic memory.TopicThread) string {
+	gist := strings.TrimSpace(topicSummary(topic).Gist)
+	if gist != "" {
+		return gist
+	}
+	if topic.Status == memory.TopicThreadStatusArchived {
+		return "这条话题已经归档，目前没有更详细的概括。"
+	}
+	return "这条话题还在进行中，摘要会继续补齐。"
+}
+
+func topicKeywords(topic memory.TopicThread) []string {
+	return topicSummary(topic).Keywords
+}
+
+func topicParticipantSummary(topic memory.TopicThread) string {
+	parts := make([]string, 0, len(topicSummary(topic).Participants))
+	for _, participant := range topicSummary(topic).Participants {
+		if strings.TrimSpace(participant.Nickname) == "" || strings.TrimSpace(participant.Position) == "" {
+			continue
+		}
+		parts = append(parts, participant.Nickname+"："+participant.Position)
+	}
+	return strings.Join(parts, "；")
+}
+
+func topicSummaryProgressText(topic memory.TopicThread) string {
+	if topic.SummaryUntilMessageLogID >= topic.LastMessageLogID {
+		return "摘要已覆盖最新消息"
+	}
+	return "还有新消息待补进摘要"
+}
+
+func topicSummaryProgressClass(topic memory.TopicThread) string {
+	if topic.SummaryUntilMessageLogID >= topic.LastMessageLogID {
+		return "inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200"
+	}
+	return "inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-200"
+}
+
+func topicMessageText(log memory.MessageLog) string {
+	text := strings.TrimSpace(log.OriginalContent)
+	if text != "" {
+		return text
+	}
+	text = strings.TrimSpace(log.Content)
+	if text != "" {
+		return text
+	}
+	return "暂无内容"
+}
+
 func formatOptionalTime(ts *time.Time) string {
 	if ts == nil || ts.IsZero() {
 		return "-"
@@ -291,14 +384,6 @@ func stickerFileURL(fileName string) string {
 		return ""
 	}
 	return "/admin/stickers/files/" + neturl.PathEscape(fileName)
-}
-
-func previewText(text string, limit int) string {
-	runes := []rune(strings.TrimSpace(text))
-	if len(runes) <= limit {
-		return string(runes)
-	}
-	return string(runes[:limit]) + "…"
 }
 
 func memoryTypeText(kind memory.MemoryType) string {

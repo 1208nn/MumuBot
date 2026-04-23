@@ -106,6 +106,8 @@ func (a *App) routes() http.Handler {
 		protected.Get("/admin/jargons", a.handleJargons)
 		protected.Get("/admin/stickers", a.handleStickers)
 		protected.Get("/admin/stickers/files/*", a.handleStickerFile)
+		protected.Get("/admin/topics", a.handleTopics)
+		protected.Get("/admin/topics/{id}", a.handleTopicDetail)
 		protected.Get("/admin/memories", a.handleMemories)
 		protected.Get("/admin/members", a.handleMembers)
 		protected.Get("/admin/system", a.handleSystem)
@@ -331,6 +333,36 @@ func (a *App) handleMemories(w http.ResponseWriter, r *http.Request) {
 	a.renderPageResponse(w, r, views.MemoryListPage(data, r.URL.Path), views.PageContent(views.MemoryListBody(data)))
 }
 
+func (a *App) handleTopics(w http.ResponseWriter, r *http.Request) {
+	data, err := a.topicPageData(r.URL, a.flashFromRequest(r))
+	if err != nil {
+		http.Error(w, "话题列表加载失败，请稍后再试。", http.StatusInternalServerError)
+		return
+	}
+
+	a.renderPageResponse(w, r, views.TopicListPage(data, r.URL.Path), views.PageContent(views.TopicListBody(data)))
+}
+
+func (a *App) handleTopicDetail(w http.ResponseWriter, r *http.Request) {
+	id, err := parseUintParam(chi.URLParam(r, "id"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	data, err := a.topicDetailPageData(id, a.flashFromRequest(r))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, "话题详情加载失败，请稍后再试。", http.StatusInternalServerError)
+		return
+	}
+
+	a.render(w, views.TopicDetailPage(data, r.URL.Path))
+}
+
 func (a *App) handleMembers(w http.ResponseWriter, r *http.Request) {
 	sortKey, order := services.NormalizeMemberSort(r.URL.Query().Get("sort"), r.URL.Query().Get("order"))
 	page := parsePositiveInt(r.URL.Query().Get("page"), 1)
@@ -550,6 +582,53 @@ func (a *App) memoryPageData(current *neturl.URL, flash *views.FlashMessage) (vi
 		Items:   result.Items,
 		Meta:    a.listMeta(current, result.Page, result.PageSize, result.Total),
 		Flash:   flash,
+	}, nil
+}
+
+func (a *App) topicPageData(current *neturl.URL, flash *views.FlashMessage) (views.TopicListPageData, error) {
+	sortKey, order := services.NormalizeTopicSort(current.Query().Get("sort"), current.Query().Get("order"))
+	page := parsePositiveInt(current.Query().Get("page"), 1)
+	pageSize := listPageSize(current.Query().Get("page_size"))
+	filter := services.TopicFilter{
+		GroupID:  parseInt64(current.Query().Get("group_id")),
+		Status:   strings.TrimSpace(current.Query().Get("status")),
+		Keyword:  strings.TrimSpace(current.Query().Get("keyword")),
+		Sort:     sortKey,
+		Order:    order,
+		Page:     page,
+		PageSize: pageSize,
+	}
+
+	result, err := a.admin.ListTopicThreads(filter)
+	if err != nil {
+		return views.TopicListPageData{}, err
+	}
+
+	return views.TopicListPageData{
+		GroupID: current.Query().Get("group_id"),
+		Status:  filter.Status,
+		Keyword: filter.Keyword,
+		Sort:    buildSortToolbar(current, sortKey, order, []sortOption{{Key: "recent", Label: "最近消息"}, {Key: "updated", Label: "最近更新"}, {Key: "created", Label: "创建时间"}, {Key: "group", Label: "群号"}}),
+		Items:   result.Items,
+		Meta:    a.listMeta(current, result.Page, result.PageSize, result.Total),
+		Flash:   flash,
+	}, nil
+}
+
+func (a *App) topicDetailPageData(id uint, flash *views.FlashMessage) (views.TopicDetailPageData, error) {
+	thread, err := a.admin.GetTopicThread(id)
+	if err != nil {
+		return views.TopicDetailPageData{}, err
+	}
+	messages, err := a.admin.ListTopicMessages(id, 80)
+	if err != nil {
+		return views.TopicDetailPageData{}, err
+	}
+
+	return views.TopicDetailPageData{
+		Thread:   thread,
+		Messages: messages,
+		Flash:    flash,
 	}, nil
 }
 

@@ -160,18 +160,76 @@ type MessageLog struct {
 	ID        uint      `gorm:"primarykey" json:"id"`
 	CreatedAt time.Time `gorm:"index" json:"created_at"`
 
-	MessageID       string `gorm:"type:varchar(100);uniqueIndex" json:"message_id"`
-	GroupID         int64  `gorm:"index" json:"group_id"`
-	UserID          int64  `gorm:"index" json:"user_id"`
-	Nickname        string `gorm:"type:varchar(100)" json:"nickname"`
-	Content         string `gorm:"type:text" json:"content"`
-	OriginalContent string `gorm:"type:text" json:"original_content,omitempty"` // 原始消息内容
-	MsgType         string `gorm:"type:varchar(50)" json:"msg_type"`
-	IsMentioned     bool   `gorm:"default:false" json:"is_mentioned"`
-	Forwards        string `gorm:"type:text" json:"forwards,omitempty"` // 合并转发内容的 JSON
+	MessageID        string  `gorm:"type:varchar(100);uniqueIndex" json:"message_id"`
+	GroupID          int64   `gorm:"index" json:"group_id"`
+	UserID           int64   `gorm:"index" json:"user_id"`
+	Nickname         string  `gorm:"type:varchar(100)" json:"nickname"`
+	Content          string  `gorm:"type:text" json:"content"`
+	OriginalContent  string  `gorm:"type:text" json:"original_content,omitempty"` // 原始消息内容
+	MsgType          string  `gorm:"type:varchar(50)" json:"msg_type"`
+	IsMentioned      bool    `gorm:"default:false" json:"is_mentioned"`
+	Forwards         string  `gorm:"type:text" json:"forwards,omitempty"` // 合并转发内容的 JSON
+	TopicThreadID    uint    `gorm:"index;default:0" json:"topic_thread_id"`
+	TopicMatchReason string  `gorm:"type:varchar(50)" json:"topic_match_reason,omitempty"`
+	TopicMatchScore  float64 `gorm:"default:0" json:"topic_match_score"`
 }
 
 func (MessageLog) TableName() string { return "message_logs" }
+
+const (
+	MaxActiveTopicThreadsPerGroup = 5
+	TopicSummaryHistoryLimit      = 5
+	TopicTailKeepMessages         = 8
+	TopicSummaryTriggerMessages   = 10
+)
+
+type TopicThreadStatus string
+
+const (
+	TopicThreadStatusActive   TopicThreadStatus = "active"
+	TopicThreadStatusArchived TopicThreadStatus = "archived"
+)
+
+type TopicSummaryParticipant struct {
+	Nickname string `json:"nickname"`
+	Position string `json:"position"`
+}
+
+type TopicParticipantRef struct {
+	UserID   int64  `json:"user_id"`
+	Nickname string `json:"nickname"`
+}
+
+type TopicSummaryV1 struct {
+	Version      int                       `json:"version"`
+	Title        string                    `json:"title"`
+	Gist         string                    `json:"gist"`
+	Facts        []string                  `json:"facts"`
+	Participants []TopicSummaryParticipant `json:"participants"`
+	OpenLoops    []string                  `json:"open_loops"`
+	RecentTurns  []string                  `json:"recent_turns"`
+	Keywords     []string                  `json:"keywords"`
+}
+
+type TopicSummarySnapshot struct {
+	CapturedAt string         `json:"captured_at"`
+	Summary    TopicSummaryV1 `json:"summary"`
+}
+
+type TopicThread struct {
+	ID        uint      `gorm:"primarykey" json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+
+	GroupID                  int64             `gorm:"index" json:"group_id"`
+	Status                   TopicThreadStatus `gorm:"type:varchar(20);index" json:"status"`
+	SummaryJSON              string            `gorm:"type:text" json:"summary_json"`
+	SummaryHistoryJSON       string            `gorm:"type:text" json:"summary_history_json"`
+	SummaryUntilMessageLogID uint              `gorm:"default:0" json:"summary_until_message_log_id"`
+	LastMessageLogID         uint              `gorm:"index;default:0" json:"last_message_log_id"`
+}
+
+func (TopicThread) TableName() string { return "topic_threads" }
 
 // Sticker 收集的表情包
 type Sticker struct {

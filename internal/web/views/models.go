@@ -150,6 +150,22 @@ type MemoryListPageData struct {
 	Flash   *FlashMessage
 }
 
+type TopicListPageData struct {
+	GroupID string
+	Status  string
+	Keyword string
+	Sort    SortToolbarData
+	Items   []memory.TopicThread
+	Meta    ListMeta
+	Flash   *FlashMessage
+}
+
+type TopicDetailPageData struct {
+	Thread   memory.TopicThread
+	Messages []memory.MessageLog
+	Flash    *FlashMessage
+}
+
 type MemberListPageData struct {
 	Keyword string
 	Sort    SortToolbarData

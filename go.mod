@@ -65,6 +65,7 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20260324052639-156f7da3f749 // indirect
 	github.com/mailru/easyjson v0.9.2 // indirect
+	github.com/mattn/go-sqlite3 v1.14.22 // indirect
 	github.com/meguminnnnnnnnn/go-openai v0.1.1 // indirect
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.13 // indirect
 	github.com/milvus-io/milvus/pkg/v2 v2.6.13 // indirect
@@ -160,7 +161,9 @@ require (
 	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0
+	github.com/jellydator/ttlcache/v3 v3.4.0
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/petar-dambovaliev/aho-corasick v0.0.0-20250424160509-463d218d4745
 	go.uber.org/zap v1.27.1
+	gorm.io/driver/sqlite v1.6.0
 )

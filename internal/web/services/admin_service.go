@@ -52,6 +52,16 @@ type MemoryFilter struct {
 	PageSize int
 }
 
+type TopicFilter struct {
+	GroupID  int64
+	Status   string
+	Keyword  string
+	Sort     string
+	Order    string
+	Page     int
+	PageSize int
+}
+
 type StickerFilter struct {
 	Keyword  string
 	Sort     string
@@ -192,6 +202,15 @@ func NormalizeMemorySort(rawSort, rawOrder string) (string, string) {
 	})
 }
 
+func NormalizeTopicSort(rawSort, rawOrder string) (string, string) {
+	return normalizeSort(rawSort, rawOrder, "recent", map[string]struct{}{
+		"recent":  {},
+		"updated": {},
+		"created": {},
+		"group":   {},
+	})
+}
+
 func NormalizeStickerSort(rawSort, rawOrder string) (string, string) {
 	return normalizeSort(rawSort, rawOrder, "use", map[string]struct{}{
 		"use":     {},
@@ -259,6 +278,20 @@ func applyStickerSort(q *gorm.DB, rawSort, rawOrder string) *gorm.DB {
 		return applyOrder(q, orderClause("created_at", order), orderClause("id", order))
 	default:
 		return applyOrder(q, orderClause("use_count", order), "updated_at DESC", "id DESC")
+	}
+}
+
+func applyTopicSort(q *gorm.DB, rawSort, rawOrder string) *gorm.DB {
+	sortKey, order := NormalizeTopicSort(rawSort, rawOrder)
+	switch sortKey {
+	case "updated":
+		return applyOrder(q, orderClause("updated_at", order), orderClause("id", order))
+	case "created":
+		return applyOrder(q, orderClause("created_at", order), orderClause("id", order))
+	case "group":
+		return applyOrder(q, orderClause("group_id", order), "last_message_log_id DESC", "id DESC")
+	default:
+		return applyOrder(q, orderClause("last_message_log_id", order), "updated_at DESC", "id DESC")
 	}
 }
 
@@ -394,6 +427,55 @@ func (s *AdminService) ListMemories(filter MemoryFilter) (Page[memory.Memory], e
 		return result, err
 	}
 	return result, nil
+}
+
+func (s *AdminService) ListTopicThreads(filter TopicFilter) (Page[memory.TopicThread], error) {
+	page, pageSize := normalizePage(filter.Page, filter.PageSize)
+	result := Page[memory.TopicThread]{Page: page, PageSize: pageSize}
+
+	q := s.db.Model(&memory.TopicThread{})
+	if filter.GroupID > 0 {
+		q = q.Where("group_id = ?", filter.GroupID)
+	}
+	if status := strings.TrimSpace(filter.Status); status != "" {
+		q = q.Where("status = ?", status)
+	}
+	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
+		pattern := "%" + keyword + "%"
+		q = q.Where("summary_json LIKE ?", pattern)
+	}
+
+	if err := q.Count(&result.Total).Error; err != nil {
+		return result, err
+	}
+	q = applyTopicSort(q, filter.Sort, filter.Order)
+	if err := q.Offset((page - 1) * pageSize).Limit(pageSize).Find(&result.Items).Error; err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func (s *AdminService) GetTopicThread(id uint) (memory.TopicThread, error) {
+	var item memory.TopicThread
+	err := s.db.First(&item, id).Error
+	return item, err
+}
+
+func (s *AdminService) ListTopicMessages(topicID uint, limit int) ([]memory.MessageLog, error) {
+	var items []memory.MessageLog
+	q := s.db.Model(&memory.MessageLog{}).
+		Where("topic_thread_id = ?", topicID).
+		Order("id DESC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	if err := q.Find(&items).Error; err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
+		items[i], items[j] = items[j], items[i]
+	}
+	return items, nil
 }
 
 func (s *AdminService) GetMemory(id uint) (memory.Memory, error) {
