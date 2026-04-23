@@ -80,11 +80,11 @@ go build -o mumu-bot .
 cp config/config.example.yaml config/config.yaml
 cp config/mcp.example.json config/mcp.json
 
-# 2. 编辑配置（填入 LLM API Key、数据库信息等）
+# 2. 编辑配置（填入模型、数据库信息等）
 # 也可通过环境变量配置敏感信息：
-#   MUMU_LLM_API_KEY                    - LLM API Key
-#   MUMU_AUX_LLM_API_KEY                - 辅助模型 API Key（用于后台学习任务）
-#   MUMU_STYLE_CLASSIFICATION_API_KEY   - 风格分类模型 API Key
+#   MUMU_MODEL_HIGH_API_KEY             - 高档模型 API Key
+#   MUMU_MODEL_MID_API_KEY              - 中档模型 API Key
+#   MUMU_MODEL_LOW_API_KEY              - 轻量模型 API Key
 #   MUMU_EMBEDDING_API_KEY              - Embedding 模型 API Key
 #   MUMU_VISION_API_KEY                 - 视觉模型 API Key
 #   MUMU_MYSQL_PASSWORD                 - MySQL 密码

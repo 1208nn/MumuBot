@@ -35,7 +35,7 @@ type Learner struct {
 }
 
 func New(memMgr *memory.Manager, jargonMgr *jargon.Manager) (*Learner, error) {
-	auxModel, err := llm.NewAuxClient()
+	midTierModel, err := llm.NewClientForTier(llm.TierMid)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func New(memMgr *memory.Manager, jargonMgr *jargon.Manager) (*Learner, error) {
 		maxStep = 10
 	}
 
-	knowledgeAgent, err := newLearnerAgent(auxModel, knowledgeTools, maxStep)
+	knowledgeAgent, err := newLearnerAgent(midTierModel, knowledgeTools, maxStep)
 	if err != nil {
 		return nil, fmt.Errorf("创建学习 Agent 失败: %w", err)
 	}
@@ -73,7 +73,7 @@ func New(memMgr *memory.Manager, jargonMgr *jargon.Manager) (*Learner, error) {
 		return nil, err
 	}
 
-	memberProfileAgent, err := newLearnerAgent(auxModel, []tool.BaseTool{memberProfileTool}, maxStep)
+	memberProfileAgent, err := newLearnerAgent(midTierModel, []tool.BaseTool{memberProfileTool}, maxStep)
 	if err != nil {
 		return nil, fmt.Errorf("创建成员画像学习 Agent 失败: %w", err)
 	}

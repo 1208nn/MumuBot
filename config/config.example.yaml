@@ -86,28 +86,31 @@ learning:
   batch_size: 100               # 每次学习的消息数量限制
   min_msg_count: 5              # 触发学习的最少消息数量
 
-# LLM配置（使用 OpenAI 兼容格式）
-llm:
-  api_key: ""        # 留空则使用 MUMU_LLM_API_KEY 环境变量
-  base_url: ""
-  model: ""
-  extra_fields: {    # 额外参数
-    "thinking": {
-      "type": "disabled"
+# 三档模型配置（需为 OpenAI 兼容 ChatModel，且都要支持工具调用）
+# 高档模型：用于沐沐实时思考与回复，推荐使用 GLM-4.7 或 Deepseek V3.2 等旗舰模型
+# 中档模型：用于话题摘要、后台学习、记忆合并，推荐使用 Qwen3.6-35B-A3B 等中端模型
+# 轻量模型：用于群风格判定，推荐使用 Qwen3.5-9B 等轻量模型
+model_tiers:
+  high:
+    api_key: ""        # 留空则使用 MUMU_MODEL_HIGH_API_KEY 环境变量
+    base_url: ""
+    model: ""
+    extra_fields: {    # 额外参数（可选）
+      "enable_thinking": false,
+      "temperature": 0.7,
+      "top_p": 0.85,
+      "frequency_penalty": 0.15
     }
-  }   
-
-# 辅助模型配置（用于后台学习任务，不占用主模型资源）
-auxiliary_model:
-  api_key: ""        # 留空则使用 MUMU_AUX_LLM_API_KEY 环境变量
-  base_url: ""
-  model: ""
-
-# 风格分类模型配置（强制项，不回退主模型或辅助模型）
-style_classification_model:
-  api_key: ""        # 留空则使用 MUMU_STYLE_CLASSIFICATION_API_KEY 环境变量
-  base_url: ""
-  model: ""
+  mid:
+    api_key: ""        # 留空则使用 MUMU_MODEL_MID_API_KEY 环境变量
+    base_url: ""
+    model: ""
+    extra_fields: {}   # 额外参数（可选）
+  low:
+    api_key: ""        # 留空则使用 MUMU_MODEL_LOW_API_KEY 环境变量
+    base_url: ""
+    model: ""
+    extra_fields: {}   # 额外参数（可选）
 
 # Embedding模型配置（用于记忆检索，强制项）
 embedding:

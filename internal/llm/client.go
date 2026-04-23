@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"mumu-bot/internal/config"
+	"strings"
 	"sync"
 
 	"github.com/cloudwego/eino-ext/components/model/openai"
@@ -11,18 +12,26 @@ import (
 )
 
 var (
-	defaultClient     model.ToolCallingChatModel
-	defaultClientErr  error
-	defaultClientOnce sync.Once
+	highTierClientSlot = &tierClientSlot{}
+	midTierClientSlot  = &tierClientSlot{}
+	lowTierClientSlot  = &tierClientSlot{}
 
-	auxClient     model.ToolCallingChatModel
-	auxClientErr  error
-	auxClientOnce sync.Once
-
-	styleClassificationClient     model.ToolCallingChatModel
-	styleClassificationClientErr  error
-	styleClassificationClientOnce sync.Once
+	chatModelFactory = newOpenAIChatModel
 )
+
+type Tier string
+
+const (
+	TierHigh Tier = "high"
+	TierMid  Tier = "mid"
+	TierLow  Tier = "low"
+)
+
+type tierClientSlot struct {
+	client model.ToolCallingChatModel
+	err    error
+	once   sync.Once
+}
 
 func newOpenAIChatModel(baseURL string, apiKey string, modelName string, extraFields map[string]interface{}) (model.ToolCallingChatModel, error) {
 	return openai.NewChatModel(context.Background(), &openai.ChatModelConfig{
@@ -33,71 +42,76 @@ func newOpenAIChatModel(baseURL string, apiKey string, modelName string, extraFi
 	})
 }
 
-// NewClient 创建 LLM 客户端（单例）
-func NewClient() (model.ToolCallingChatModel, error) {
-	defaultClientOnce.Do(func() {
-		cfg := config.Get()
-
-		chatModel, err := newOpenAIChatModel(cfg.LLM.BaseURL, cfg.LLM.APIKey, cfg.LLM.Model, cfg.LLM.ExtraFields)
-		if err != nil {
-			defaultClientErr = fmt.Errorf("创建 ChatModel 失败: %w", err)
-			return
-		}
-
-		defaultClient = chatModel
-	})
-
-	return defaultClient, defaultClientErr
+func TierDisplayName(tier Tier) string {
+	switch tier {
+	case TierHigh:
+		return "高档模型"
+	case TierMid:
+		return "中档模型"
+	case TierLow:
+		return "轻量模型"
+	default:
+		return "模型"
+	}
 }
 
-// NewAuxClient 创建辅助 LLM 客户端（单例）
-func NewAuxClient() (model.ToolCallingChatModel, error) {
-	auxClientOnce.Do(func() {
-		cfg := config.Get()
-		if cfg == nil {
-			auxClientErr = fmt.Errorf("配置未加载")
-			return
-		}
-		if cfg.AuxiliaryModel.APIKey == "" || cfg.AuxiliaryModel.BaseURL == "" || cfg.AuxiliaryModel.Model == "" {
-			auxClientErr = fmt.Errorf("辅助模型配置不完整")
-			return
-		}
+func NewClientForTier(tier Tier) (model.ToolCallingChatModel, error) {
+	cfg := config.Get()
+	if cfg == nil {
+		return nil, fmt.Errorf("配置未加载")
+	}
 
-		chatModel, err := newOpenAIChatModel(cfg.AuxiliaryModel.BaseURL, cfg.AuxiliaryModel.APIKey, cfg.AuxiliaryModel.Model, nil)
-		if err != nil {
-			auxClientErr = fmt.Errorf("创建辅助 ChatModel 失败: %w", err)
-			return
-		}
-
-		auxClient = chatModel
-	})
-
-	return auxClient, auxClientErr
+	modelCfg, err := tierConfig(cfg, tier)
+	if err != nil {
+		return nil, err
+	}
+	return getTierClient(tier, modelCfg)
 }
 
-// NewStyleClassificationClient 创建风格分类 LLM 客户端（单例）
-func NewStyleClassificationClient() (model.ToolCallingChatModel, error) {
-	styleClassificationClientOnce.Do(func() {
-		cfg := config.Get()
-		if cfg == nil {
-			styleClassificationClientErr = fmt.Errorf("配置未加载")
+func getTierClient(tier Tier, cfg config.ModelConfig) (model.ToolCallingChatModel, error) {
+	slot := tierClientSlotFor(tier)
+	slot.once.Do(func() {
+		apiKey := strings.TrimSpace(cfg.APIKey)
+		baseURL := strings.TrimSpace(cfg.BaseURL)
+		modelName := strings.TrimSpace(cfg.Model)
+		if apiKey == "" || baseURL == "" || modelName == "" {
+			slot.err = fmt.Errorf("%s配置不完整", TierDisplayName(tier))
 			return
 		}
 
-		modelCfg := cfg.StyleClassificationModel
-		if modelCfg.APIKey == "" || modelCfg.BaseURL == "" || modelCfg.Model == "" {
-			styleClassificationClientErr = fmt.Errorf("style classification 模型配置不完整")
-			return
-		}
-
-		chatModel, err := newOpenAIChatModel(modelCfg.BaseURL, modelCfg.APIKey, modelCfg.Model, nil)
+		chatModel, err := chatModelFactory(baseURL, apiKey, modelName, cfg.ExtraFields)
 		if err != nil {
-			styleClassificationClientErr = fmt.Errorf("创建风格分类 ChatModel 失败: %w", err)
+			slot.err = fmt.Errorf("创建%s失败: %w", TierDisplayName(tier), err)
 			return
 		}
-
-		styleClassificationClient = chatModel
+		slot.client = chatModel
 	})
 
-	return styleClassificationClient, styleClassificationClientErr
+	return slot.client, slot.err
+}
+
+func tierConfig(cfg *config.Config, tier Tier) (config.ModelConfig, error) {
+	switch tier {
+	case TierHigh:
+		return cfg.ModelTiers.High, nil
+	case TierMid:
+		return cfg.ModelTiers.Mid, nil
+	case TierLow:
+		return cfg.ModelTiers.Low, nil
+	default:
+		return config.ModelConfig{}, fmt.Errorf("未知模型档位: %s", tier)
+	}
+}
+
+func tierClientSlotFor(tier Tier) *tierClientSlot {
+	switch tier {
+	case TierHigh:
+		return highTierClientSlot
+	case TierMid:
+		return midTierClientSlot
+	case TierLow:
+		return lowTierClientSlot
+	default:
+		return &tierClientSlot{}
+	}
 }

@@ -97,11 +97,15 @@ func New(mem *memory.Manager) (*Agent, error) {
 
 	p := persona.NewPersona(&cfg.Persona)
 
-	chatModel, err := llm.NewClient()
+	chatModel, err := llm.NewClientForTier(llm.TierHigh)
 	if err != nil {
 		return nil, fmt.Errorf("创建 LLM 客户端失败: %w", err)
 	}
-	zap.L().Info("LLM 已连接", zap.String("model", cfg.LLM.Model), zap.String("base_url", cfg.LLM.BaseURL))
+
+	topicModel, err := llm.NewClientForTier(llm.TierMid)
+	if err != nil {
+		return nil, fmt.Errorf("创建话题摘要模型失败: %w", err)
+	}
 
 	var visionClient *llm.VisionClient
 	if cfg.VisionLLM.Enabled {
@@ -131,7 +135,7 @@ func New(mem *memory.Manager) (*Agent, error) {
 		replyCache:        newAgentTTLCache[int64, onebot.ReplyInfo](replyCacheCapacity, replyCacheTTL),
 		visionCache:       newAgentTTLCache[string, string](visionCacheCapacity, visionCacheTTL),
 	}
-	a.topicMgr = NewTopicManager(rootCtx, mem, chatModel)
+	a.topicMgr = NewTopicManager(rootCtx, mem, topicModel)
 	constructed := false
 	defer func() {
 		if constructed {
@@ -259,7 +263,7 @@ func (a *Agent) initReact() error {
 }
 
 func (a *Agent) initStyleClassifier() error {
-	classifier, err := llm.NewStyleClassificationClient()
+	classifier, err := llm.NewClientForTier(llm.TierLow)
 	if err != nil {
 		return err
 	}

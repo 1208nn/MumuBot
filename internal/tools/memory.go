@@ -57,8 +57,8 @@ func saveMemoryFunc(ctx context.Context, input *SaveMemoryInput) (*SaveMemoryOut
 	// 向量相似度搜索
 	similarMems, err := tc.MemoryMgr.SearchSimilarMemories(ctx, input.Content, tc.GroupID, "", 30, 0.85)
 	if err == nil && len(similarMems) > 0 {
-		// 调用辅助模型进行合并
-		auxModel, err := llm.NewAuxClient()
+		// 调用中档模型尝试合并相似记忆
+		midTierModel, err := llm.NewClientForTier(llm.TierMid)
 		if err == nil {
 			var oldContents []string
 			for _, m := range similarMems {
@@ -80,7 +80,7 @@ func saveMemoryFunc(ctx context.Context, input *SaveMemoryInput) (*SaveMemoryOut
 3. 如果新记忆是旧记忆的更新（例如状态变化），请以最新状态为准，但保留重要历史背景。
 4. 只输出合并后的记忆内容，不要包含其他废话。`, strings.Join(oldContents, "\n"), input.Content)
 
-			resp, err := auxModel.Generate(ctx, []*schema.Message{
+			resp, err := midTierModel.Generate(ctx, []*schema.Message{
 				schema.UserMessage(prompt),
 			})
 
@@ -101,7 +101,7 @@ func saveMemoryFunc(ctx context.Context, input *SaveMemoryInput) (*SaveMemoryOut
 				}
 			}
 		} else {
-			zap.L().Warn("辅助模型初始化失败，跳过记忆合并", zap.Error(err))
+			zap.L().Warn("中档模型初始化失败，跳过记忆合并", zap.Error(err))
 		}
 	}
 

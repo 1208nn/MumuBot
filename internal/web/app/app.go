@@ -16,6 +16,7 @@ import (
 	"unicode/utf16"
 
 	"mumu-bot/internal/config"
+	"mumu-bot/internal/llm"
 	"mumu-bot/internal/memory"
 	"mumu-bot/internal/web/assets"
 	"mumu-bot/internal/web/auth"
@@ -953,10 +954,10 @@ func (a *App) systemSections() []views.SystemSection {
 		}
 	}
 
-	modelFields := make([]views.SystemField, 0, 6)
-	modelFields = appendField(modelFields, "对话回复", cfg.LLM.Model)
-	modelFields = appendField(modelFields, "辅助判断", cfg.AuxiliaryModel.Model)
-	modelFields = appendField(modelFields, "风格判断", cfg.StyleClassificationModel.Model)
+	modelFields := make([]views.SystemField, 0, 8)
+	modelFields = appendField(modelFields, llm.TierDisplayName(llm.TierHigh), cfg.ModelTiers.High.Model)
+	modelFields = appendField(modelFields, llm.TierDisplayName(llm.TierMid), cfg.ModelTiers.Mid.Model)
+	modelFields = appendField(modelFields, llm.TierDisplayName(llm.TierLow), cfg.ModelTiers.Low.Model)
 	modelFields = appendField(modelFields, "记忆检索", cfg.Embedding.Model)
 	if cfg.VisionLLM.Enabled {
 		modelFields = appendField(modelFields, "图片理解", cfg.VisionLLM.Model)
