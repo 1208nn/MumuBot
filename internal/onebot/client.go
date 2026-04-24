@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"mumu-bot/internal/config"
+	"mumu-bot/internal/utils"
 	"strconv"
 	"strings"
 	"sync"
@@ -311,7 +312,7 @@ func (c *Client) handleMetaEvent(event map[string]interface{}) {
 	if metaType == "lifecycle" {
 		subType, _ := event["sub_type"].(string)
 		if subType == "connect" {
-			if selfID, ok := parseInt64(event["self_id"]); ok {
+			if selfID, ok := utils.ParseInt64Value(event["self_id"]); ok {
 				c.selfID = selfID
 				zap.L().Info("Bot 已上线", zap.Int64("qq", c.selfID))
 			}
@@ -352,12 +353,12 @@ func (c *Client) handleNoticeEvent(event map[string]interface{}) {
 }
 
 func (c *Client) handleGroupBanNotice(event map[string]interface{}, subType string) {
-	groupID, ok := parseInt64(event["group_id"])
+	groupID, ok := utils.ParseInt64Value(event["group_id"])
 	if !ok || groupID == 0 {
 		return
 	}
 
-	userID, ok := parseInt64(event["user_id"])
+	userID, ok := utils.ParseInt64Value(event["user_id"])
 	if !ok || userID != c.selfID {
 		return
 	}
@@ -371,7 +372,7 @@ func (c *Client) handleGroupBanNotice(event map[string]interface{}, subType stri
 		return
 	}
 
-	if durationSec, ok := parseInt64(event["duration"]); ok && durationSec > 0 {
+	if durationSec, ok := utils.ParseInt64Value(event["duration"]); ok && durationSec > 0 {
 		c.setSelfMutedUntil(groupID, time.Now().Add(time.Duration(durationSec)*time.Second))
 		return
 	}
@@ -422,14 +423,14 @@ func (c *Client) parseGroupMessage(event map[string]interface{}) *GroupMessage {
 	}
 
 	// 消息时间
-	if t, ok := parseInt64(event["time"]); ok {
+	if t, ok := utils.ParseInt64Value(event["time"]); ok {
 		msg.Time = time.Unix(t, 0)
 	} else {
 		msg.Time = time.Now()
 	}
 
 	// 消息 ID
-	if msgID, ok := parseInt64(event["message_id"]); ok {
+	if msgID, ok := utils.ParseInt64Value(event["message_id"]); ok {
 		msg.MessageID = msgID
 		readCtx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
 		if err := c.MarkMsgAsRead(readCtx, msgID); err != nil {
@@ -439,13 +440,13 @@ func (c *Client) parseGroupMessage(event map[string]interface{}) *GroupMessage {
 	}
 
 	// 群ID
-	if groupID, ok := parseInt64(event["group_id"]); ok {
+	if groupID, ok := utils.ParseInt64Value(event["group_id"]); ok {
 		msg.GroupID = groupID
 	}
 
 	// 发送者信息
 	if sender, ok := event["sender"].(map[string]interface{}); ok {
-		if userID, ok := parseInt64(sender["user_id"]); ok {
+		if userID, ok := utils.ParseInt64Value(sender["user_id"]); ok {
 			msg.UserID = userID
 		}
 		if nickname, ok := sender["nickname"].(string); ok {
@@ -539,13 +540,13 @@ func (c *Client) parseMessageSegments(event map[string]interface{}, msg *GroupMe
 					msg.AtList = append(msg.AtList, qqID)
 					textParts = append(textParts, "@"+qq)
 				}
-			} else if qqID, ok := parseInt64(data["qq"]); ok {
+			} else if qqID, ok := utils.ParseInt64Value(data["qq"]); ok {
 				msg.AtList = append(msg.AtList, qqID)
 				textParts = append(textParts, fmt.Sprintf("@%d", qqID))
 			}
 
 		case "reply":
-			if replyMsgID, ok := parseInt64(data["id"]); ok {
+			if replyMsgID, ok := utils.ParseInt64Value(data["id"]); ok {
 				msg.Reply = &ReplyInfo{MessageID: replyMsgID}
 			}
 
@@ -696,7 +697,7 @@ func (c *Client) SendGroupMessage(ctx context.Context, groupID int64, content st
 		return 0, err
 	}
 	if data := resp.DataMap(); data != nil {
-		if msgID, ok := parseInt64(data["message_id"]); ok {
+		if msgID, ok := utils.ParseInt64Value(data["message_id"]); ok {
 			return msgID, nil
 		}
 	}
@@ -713,7 +714,7 @@ func (c *Client) SendPrivateMessage(ctx context.Context, userID int64, content s
 		return 0, err
 	}
 	if data := resp.DataMap(); data != nil {
-		if msgID, ok := parseInt64(data["message_id"]); ok {
+		if msgID, ok := utils.ParseInt64Value(data["message_id"]); ok {
 			return msgID, nil
 		}
 	}
@@ -750,7 +751,7 @@ func (c *Client) GetLoginInfo(ctx context.Context) (*LoginInfo, error) {
 		return nil, fmt.Errorf("无效的响应数据")
 	}
 	info := &LoginInfo{}
-	if userID, ok := parseInt64(data["user_id"]); ok {
+	if userID, ok := utils.ParseInt64Value(data["user_id"]); ok {
 		info.UserID = userID
 	}
 	if nickname, ok := data["nickname"].(string); ok {
@@ -773,7 +774,7 @@ func (c *Client) GetGroupInfo(ctx context.Context, groupID int64, noCache bool) 
 		return nil, fmt.Errorf("无效的响应数据")
 	}
 	info := &GroupInfo{}
-	if gid, ok := parseInt64(data["group_id"]); ok {
+	if gid, ok := utils.ParseInt64Value(data["group_id"]); ok {
 		info.GroupID = gid
 	}
 	if name, ok := data["group_name"].(string); ok {
@@ -803,10 +804,10 @@ func (c *Client) GetGroupMemberInfo(ctx context.Context, groupID, userID int64, 
 		return nil, fmt.Errorf("无效的响应数据")
 	}
 	info := &GroupMemberInfo{}
-	if gid, ok := parseInt64(data["group_id"]); ok {
+	if gid, ok := utils.ParseInt64Value(data["group_id"]); ok {
 		info.GroupID = gid
 	}
-	if uid, ok := parseInt64(data["user_id"]); ok {
+	if uid, ok := utils.ParseInt64Value(data["user_id"]); ok {
 		info.UserID = uid
 	}
 	if nickname, ok := data["nickname"].(string); ok {
@@ -818,10 +819,10 @@ func (c *Client) GetGroupMemberInfo(ctx context.Context, groupID, userID int64, 
 	if role, ok := data["role"].(string); ok {
 		info.Role = role
 	}
-	if joinTime, ok := parseInt64(data["join_time"]); ok {
+	if joinTime, ok := utils.ParseInt64Value(data["join_time"]); ok {
 		info.JoinTime = joinTime
 	}
-	if lastSentTime, ok := parseInt64(data["last_sent_time"]); ok {
+	if lastSentTime, ok := utils.ParseInt64Value(data["last_sent_time"]); ok {
 		info.LastSentTime = lastSentTime
 	}
 	if level, ok := data["level"].(string); ok {
@@ -856,10 +857,10 @@ func (c *Client) GetGroupMemberList(ctx context.Context, groupID int64, noCache 
 			continue
 		}
 		info := &GroupMemberInfo{}
-		if gid, ok := parseInt64(data["group_id"]); ok {
+		if gid, ok := utils.ParseInt64Value(data["group_id"]); ok {
 			info.GroupID = gid
 		}
-		if uid, ok := parseInt64(data["user_id"]); ok {
+		if uid, ok := utils.ParseInt64Value(data["user_id"]); ok {
 			info.UserID = uid
 		}
 		if nickname, ok := data["nickname"].(string); ok {
@@ -871,10 +872,10 @@ func (c *Client) GetGroupMemberList(ctx context.Context, groupID int64, noCache 
 		if role, ok := data["role"].(string); ok {
 			info.Role = role
 		}
-		if joinTime, ok := parseInt64(data["join_time"]); ok {
+		if joinTime, ok := utils.ParseInt64Value(data["join_time"]); ok {
 			info.JoinTime = joinTime
 		}
-		if lastSentTime, ok := parseInt64(data["last_sent_time"]); ok {
+		if lastSentTime, ok := utils.ParseInt64Value(data["last_sent_time"]); ok {
 			info.LastSentTime = lastSentTime
 		}
 		if level, ok := data["level"].(string); ok {
@@ -1107,10 +1108,10 @@ func (c *Client) GetGroupNotice(ctx context.Context, groupID int64) ([]GroupNoti
 		if noticeID, ok := data["notice_id"].(string); ok {
 			notice.NoticeID = noticeID
 		}
-		if senderID, ok := parseInt64(data["sender_id"]); ok {
+		if senderID, ok := utils.ParseInt64Value(data["sender_id"]); ok {
 			notice.SenderID = senderID
 		}
-		if publishTime, ok := parseInt64(data["publish_time"]); ok {
+		if publishTime, ok := utils.ParseInt64Value(data["publish_time"]); ok {
 			notice.PublishTime = publishTime
 		}
 		if msg, ok := data["message"].(map[string]interface{}); ok {
@@ -1144,22 +1145,22 @@ func (c *Client) GetEssenceMessages(ctx context.Context, groupID int64) ([]Essen
 			continue
 		}
 		msg := EssenceMessage{}
-		if msgID, ok := parseInt64(data["message_id"]); ok {
+		if msgID, ok := utils.ParseInt64Value(data["message_id"]); ok {
 			msg.MessageID = msgID
 		}
-		if senderID, ok := parseInt64(data["sender_id"]); ok {
+		if senderID, ok := utils.ParseInt64Value(data["sender_id"]); ok {
 			msg.SenderID = senderID
 		}
 		if senderNick, ok := data["sender_nick"].(string); ok {
 			msg.SenderNick = senderNick
 		}
-		if operatorID, ok := parseInt64(data["operator_id"]); ok {
+		if operatorID, ok := utils.ParseInt64Value(data["operator_id"]); ok {
 			msg.OperatorID = operatorID
 		}
 		if operatorNick, ok := data["operator_nick"].(string); ok {
 			msg.OperatorNick = operatorNick
 		}
-		if operatorTime, ok := parseInt64(data["operator_time"]); ok {
+		if operatorTime, ok := utils.ParseInt64Value(data["operator_time"]); ok {
 			msg.OperatorTime = operatorTime
 		}
 		// 解析消息内容
@@ -1208,14 +1209,14 @@ func parseForwardMessages(data map[string]interface{}) []ForwardMessage {
 		}
 		fm := ForwardMessage{}
 		if sender, ok := msgMap["sender"].(map[string]interface{}); ok {
-			if uid, ok := parseInt64(sender["user_id"]); ok {
+			if uid, ok := utils.ParseInt64Value(sender["user_id"]); ok {
 				fm.UserID = uid
 			}
 			if nick, ok := sender["nickname"].(string); ok {
 				fm.Nickname = nick
 			}
 		}
-		if t, ok := parseInt64(msgMap["time"]); ok {
+		if t, ok := utils.ParseInt64Value(msgMap["time"]); ok {
 			fm.Time = time.Unix(t, 0)
 		}
 		if segs, ok := msgMap["message"].([]interface{}); ok {
@@ -1266,7 +1267,7 @@ func extractTextFromSegments(segments []interface{}) string {
 				} else {
 					parts = append(parts, "@"+qq)
 				}
-			} else if qqID, ok := parseInt64(data["qq"]); ok {
+			} else if qqID, ok := utils.ParseInt64Value(data["qq"]); ok {
 				parts = append(parts, fmt.Sprintf("@%d", qqID))
 			}
 		case "json":
@@ -1339,30 +1340,11 @@ func (c *Client) SendImageMessage(ctx context.Context, groupID int64, filePath s
 		return 0, err
 	}
 	if data := resp.DataMap(); data != nil {
-		if msgID, ok := parseInt64(data["message_id"]); ok {
+		if msgID, ok := utils.ParseInt64Value(data["message_id"]); ok {
 			return msgID, nil
 		}
 	}
 	return 0, nil
-}
-
-// 助手函数
-func parseInt64(v interface{}) (int64, bool) {
-	if v == nil {
-		return 0, false
-	}
-	switch val := v.(type) {
-	case int64:
-		return val, true
-	case float64:
-		return int64(val), true
-	case int:
-		return int64(val), true
-	case string:
-		i, err := strconv.ParseInt(val, 10, 64)
-		return i, err == nil
-	}
-	return 0, false
 }
 
 func parseInt(v interface{}) (int, bool) {

@@ -141,13 +141,16 @@ type StickerListPageData struct {
 }
 
 type MemoryListPageData struct {
-	GroupID string
-	Type    string
-	Keyword string
-	Sort    SortToolbarData
-	Items   []memory.Memory
-	Meta    ListMeta
-	Flash   *FlashMessage
+	GroupID       string
+	Type          string
+	Status        string
+	CanonicalType string
+	SourceKind    string
+	Keyword       string
+	Sort          SortToolbarData
+	Items         []memory.Memory
+	Meta          ListMeta
+	Flash         *FlashMessage
 }
 
 type TopicListPageData struct {

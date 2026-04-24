@@ -449,6 +449,20 @@ func (a *App) handleActionDialogFragment(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		a.render(w, views.AdminActionDialogContent(views.MemoryDeleteDialogData(item, returnTo)))
+	case "memory-archive":
+		item, err := a.admin.GetMemory(id)
+		if err != nil {
+			a.renderStatus(w, http.StatusOK, views.DialogErrorContent("admin-action-dialog", "记忆无法加载", "这条记忆可能已经不存在。"))
+			return
+		}
+		a.render(w, views.AdminActionDialogContent(views.MemoryArchiveDialogData(item, returnTo)))
+	case "memory-restore":
+		item, err := a.admin.GetMemory(id)
+		if err != nil {
+			a.renderStatus(w, http.StatusOK, views.DialogErrorContent("admin-action-dialog", "记忆无法加载", "这条记忆可能已经不存在。"))
+			return
+		}
+		a.render(w, views.AdminActionDialogContent(views.MemoryRestoreDialogData(item, returnTo)))
 	default:
 		a.renderStatus(w, http.StatusOK, views.DialogErrorContent("admin-action-dialog", "操作无法继续", "未识别这次操作。"))
 	}
@@ -475,7 +489,7 @@ func (a *App) styleCardPageData(current *neturl.URL, flash *views.FlashMessage) 
 	page := parsePositiveInt(current.Query().Get("page"), 1)
 	pageSize := listPageSize(current.Query().Get("page_size"))
 	filter := services.StyleCardFilter{
-		GroupID:  parseInt64(current.Query().Get("group_id")),
+		GroupID:  parseInt64Query(current.Query().Get("group_id")),
 		Status:   strings.TrimSpace(current.Query().Get("status")),
 		Keyword:  strings.TrimSpace(current.Query().Get("keyword")),
 		Sort:     sortKey,
@@ -505,7 +519,7 @@ func (a *App) jargonPageData(current *neturl.URL, flash *views.FlashMessage) (vi
 	page := parsePositiveInt(current.Query().Get("page"), 1)
 	pageSize := listPageSize(current.Query().Get("page_size"))
 	filter := services.JargonFilter{
-		GroupID:  parseInt64(current.Query().Get("group_id")),
+		GroupID:  parseInt64Query(current.Query().Get("group_id")),
 		Status:   strings.TrimSpace(current.Query().Get("status")),
 		Keyword:  strings.TrimSpace(current.Query().Get("keyword")),
 		Sort:     sortKey,
@@ -561,13 +575,16 @@ func (a *App) memoryPageData(current *neturl.URL, flash *views.FlashMessage) (vi
 	page := parsePositiveInt(current.Query().Get("page"), 1)
 	pageSize := listPageSize(current.Query().Get("page_size"))
 	filter := services.MemoryFilter{
-		GroupID:  parseInt64(current.Query().Get("group_id")),
-		Type:     strings.TrimSpace(current.Query().Get("type")),
-		Keyword:  strings.TrimSpace(current.Query().Get("keyword")),
-		Sort:     sortKey,
-		Order:    order,
-		Page:     page,
-		PageSize: pageSize,
+		GroupID:       parseInt64Query(current.Query().Get("group_id")),
+		Type:          strings.TrimSpace(current.Query().Get("type")),
+		Status:        strings.TrimSpace(current.Query().Get("status")),
+		CanonicalType: strings.TrimSpace(current.Query().Get("canonical_type")),
+		SourceKind:    strings.TrimSpace(current.Query().Get("source_kind")),
+		Keyword:       strings.TrimSpace(current.Query().Get("keyword")),
+		Sort:          sortKey,
+		Order:         order,
+		Page:          page,
+		PageSize:      pageSize,
 	}
 
 	result, err := a.admin.ListMemories(filter)
@@ -576,13 +593,16 @@ func (a *App) memoryPageData(current *neturl.URL, flash *views.FlashMessage) (vi
 	}
 
 	return views.MemoryListPageData{
-		GroupID: current.Query().Get("group_id"),
-		Type:    filter.Type,
-		Keyword: filter.Keyword,
-		Sort:    buildSortToolbar(current, sortKey, order, []sortOption{{Key: "updated", Label: "最近更新"}, {Key: "created", Label: "创建时间"}, {Key: "access", Label: "访问量"}, {Key: "importance", Label: "重要度"}}),
-		Items:   result.Items,
-		Meta:    a.listMeta(current, result.Page, result.PageSize, result.Total),
-		Flash:   flash,
+		GroupID:       current.Query().Get("group_id"),
+		Type:          filter.Type,
+		Status:        filter.Status,
+		CanonicalType: filter.CanonicalType,
+		SourceKind:    filter.SourceKind,
+		Keyword:       filter.Keyword,
+		Sort:          buildSortToolbar(current, sortKey, order, []sortOption{{Key: "updated", Label: "最近更新"}, {Key: "created", Label: "创建时间"}, {Key: "access", Label: "访问量"}, {Key: "importance", Label: "重要度"}, {Key: "evidence", Label: "证据数"}}),
+		Items:         result.Items,
+		Meta:          a.listMeta(current, result.Page, result.PageSize, result.Total),
+		Flash:         flash,
 	}, nil
 }
 
@@ -591,7 +611,7 @@ func (a *App) topicPageData(current *neturl.URL, flash *views.FlashMessage) (vie
 	page := parsePositiveInt(current.Query().Get("page"), 1)
 	pageSize := listPageSize(current.Query().Get("page_size"))
 	filter := services.TopicFilter{
-		GroupID:  parseInt64(current.Query().Get("group_id")),
+		GroupID:  parseInt64Query(current.Query().Get("group_id")),
 		Status:   strings.TrimSpace(current.Query().Get("status")),
 		Keyword:  strings.TrimSpace(current.Query().Get("keyword")),
 		Sort:     sortKey,
@@ -679,6 +699,20 @@ func (a *App) handleAdminAction(w http.ResponseWriter, r *http.Request) {
 		}
 		fallback = "/admin/memories"
 		flash = &views.FlashMessage{Kind: "success", Title: "记忆已删除"}
+	case "memory-archive":
+		if err := a.admin.ArchiveMemory(id); err != nil {
+			a.respondActionError(w, r, http.StatusInternalServerError, &views.FlashMessage{Kind: "error", Title: "记忆归档失败", Body: deleteActionErrorText(err)})
+			return
+		}
+		fallback = "/admin/memories"
+		flash = &views.FlashMessage{Kind: "success", Title: "记忆已归档"}
+	case "memory-restore":
+		if err := a.admin.RestoreMemoryToCandidate(id); err != nil {
+			a.respondActionError(w, r, http.StatusInternalServerError, &views.FlashMessage{Kind: "error", Title: "记忆恢复失败", Body: deleteActionErrorText(err)})
+			return
+		}
+		fallback = "/admin/memories"
+		flash = &views.FlashMessage{Kind: "success", Title: "记忆已恢复到待收敛"}
 	default:
 		a.respondActionError(w, r, http.StatusBadRequest, &views.FlashMessage{Kind: "error", Title: "操作失败", Body: "未识别这次操作。"})
 		return
@@ -1149,7 +1183,7 @@ func listPageSize(raw string) int {
 	return parsePositiveInt(raw, defaultListPageSize)
 }
 
-func parseInt64(raw string) int64 {
+func parseInt64Query(raw string) int64 {
 	value, _ := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
 	return value
 }

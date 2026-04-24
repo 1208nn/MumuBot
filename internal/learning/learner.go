@@ -215,6 +215,8 @@ func (l *Learner) processReview(groupID int64) {
 2. trigger_rule 和 avoid_rule 是否明确；
 3. 是否容易误伤、过度攻击或强烈阴阳；
 4. 例句是否短、自然、像参考味道而不是模板。
+5. 如果内容来自机器人的发言、具体人名事件、一次性上下文，或 source_excerpt 不能提供短证据，请拒绝。
+6. 普通技术词、通用缩写、无需上下文也能理解的词不应作为黑话通过。
 
 注意：审核工具支持批量操作，请将同一审核结果的 ID 放入列表中一次性提交，尽量减少工具调用次数。`
 
@@ -336,17 +338,20 @@ func (l *Learner) processKnowledgeExtraction(groupID int64, msgs []memory.Messag
 %s
 
 要求：
-1. 识别**新的**黑话/梗。黑话的含义应该是与上下文相关的，如果无需上下文就可以推断该词的意思，则该词不是黑话。
-2. 识别可复用的群聊风格卡片，而不是一次性内容。
-3. 风格卡片必须使用以下 intent 枚举之一：%s。
-4. 风格卡片必须使用以下 tone 枚举之一：%s。
-5. 每张风格卡片必须包含：intent、tone、trigger_rule、avoid_rule、example、source_excerpt。
-6. example 必须是短句，只作为语气味道参考，不能写成长模板。
-7. 如果无法给出明确的 trigger_rule 和 avoid_rule，就不要保存该卡片。
-8. 强攻击性、强冒犯性、强阴阳且容易误伤的表达不要保存为风格卡片。
-9. 忽略通用语言或普通词汇，专注于独特的群体文化。
-10. 使用提供的工具 'saveJargon' 和 'saveStyleCard' 来保存你的发现。
-11. 如果没有发现有价值的内容，请直接回复“无新发现”。
+1. 识别**新的**黑话/梗。黑话必须依赖上下文才能理解；普通技术词、通用缩写、无需上下文也能理解的词不要保存。
+2. 证据不足时不保存黑话，不要猜测含义。
+3. 识别可复用的群聊风格卡片，而不是一次性内容。
+4. 风格卡片写成可复用的情境和表达方式，不写具体人名、具体事件、一次性上下文。
+5. 风格卡片必须使用以下 intent 枚举之一：%s。
+6. 风格卡片必须使用以下 tone 枚举之一：%s。
+7. 每张风格卡片必须包含：intent、tone、trigger_rule、avoid_rule、example、source_excerpt。
+8. source_excerpt 只保留能证明判断的短证据，不要整段复制聊天。
+9. example 必须是短句，只作为语气味道参考，不能写成长模板。
+10. 如果无法给出明确的 trigger_rule 和 avoid_rule，就不要保存该卡片。
+11. 强攻击性、强冒犯性、强阴阳且容易误伤的表达不要保存为风格卡片。
+12. 忽略通用语言或普通词汇，专注于独特的群体文化。
+13. 使用提供的工具 'saveJargon' 和 'saveStyleCard' 来保存你的发现。
+14. 如果没有发现有价值的内容，请直接回复“无新发现”。
 `, chatLog.String(), knownJargons, strings.Join(memory.StyleIntentValues(), "、"), strings.Join(memory.StyleToneValues(), "、"))
 
 	// 创建学习上下文

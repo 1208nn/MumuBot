@@ -43,13 +43,16 @@ type JargonFilter struct {
 }
 
 type MemoryFilter struct {
-	GroupID  int64
-	Type     string
-	Keyword  string
-	Sort     string
-	Order    string
-	Page     int
-	PageSize int
+	GroupID       int64
+	Type          string
+	Status        string
+	CanonicalType string
+	SourceKind    string
+	Keyword       string
+	Sort          string
+	Order         string
+	Page          int
+	PageSize      int
 }
 
 type TopicFilter struct {
@@ -83,6 +86,8 @@ type AdminService struct {
 	stickerDir string
 	memDeleter interface {
 		DeleteMemory(ctx context.Context, id uint) error
+		ArchiveMemory(ctx context.Context, id uint) error
+		RestoreMemoryToCandidate(ctx context.Context, id uint) error
 	}
 	jargonReloader interface {
 		ReloadJargons()
@@ -114,6 +119,8 @@ func (s *AdminService) StickerDir() string {
 
 func (s *AdminService) WithMemoryDeleter(deleter interface {
 	DeleteMemory(ctx context.Context, id uint) error
+	ArchiveMemory(ctx context.Context, id uint) error
+	RestoreMemoryToCandidate(ctx context.Context, id uint) error
 },
 ) *AdminService {
 	s.memDeleter = deleter
@@ -141,6 +148,7 @@ func normalizePage(page, pageSize int) (int, int) {
 	return page, pageSize
 }
 
+// normalizeSort 只返回白名单内的页面排序键，SQL 列名仍由 apply*Sort 中的固定映射决定。
 func normalizeSort(rawSort, rawOrder, defaultSort string, allowed map[string]struct{}) (string, string) {
 	sortKey := strings.TrimSpace(strings.ToLower(rawSort))
 	if _, ok := allowed[sortKey]; !ok {
@@ -199,6 +207,7 @@ func NormalizeMemorySort(rawSort, rawOrder string) (string, string) {
 		"created":    {},
 		"access":     {},
 		"importance": {},
+		"evidence":   {},
 	})
 }
 
@@ -264,6 +273,8 @@ func applyMemorySort(q *gorm.DB, rawSort, rawOrder string) *gorm.DB {
 		return applyOrder(q, orderClause("access_count", order), "updated_at DESC", "id DESC")
 	case "importance":
 		return applyOrder(q, orderClause("importance", order), "updated_at DESC", "id DESC")
+	case "evidence":
+		return applyOrder(q, orderClause("evidence_count", order), "updated_at DESC", "id DESC")
 	default:
 		return applyOrder(q, orderClause("updated_at", order), orderClause("id", order))
 	}
@@ -415,8 +426,25 @@ func (s *AdminService) ListMemories(filter MemoryFilter) (Page[memory.Memory], e
 	if strings.TrimSpace(filter.Type) != "" {
 		q = q.Where("type = ?", strings.TrimSpace(filter.Type))
 	}
+	if strings.TrimSpace(filter.CanonicalType) != "" {
+		q = q.Where("canonical_type = ?", strings.TrimSpace(filter.CanonicalType))
+	}
+	switch strings.TrimSpace(filter.Status) {
+	case "active", "candidate", "archived", "legacy":
+		if filter.Status == "legacy" {
+			q = q.Where("(status = ? OR status = '')", memory.MemoryStatusLegacy)
+		} else {
+			q = q.Where("status = ?", strings.TrimSpace(filter.Status))
+		}
+	default:
+		q = q.Where("status = ?", memory.MemoryStatusActive)
+	}
+	if strings.TrimSpace(filter.SourceKind) != "" {
+		q = q.Where("source_kind = ?", strings.TrimSpace(filter.SourceKind))
+	}
 	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
-		q = q.Where("content LIKE ?", "%"+keyword+"%")
+		pattern := "%" + keyword + "%"
+		q = q.Where("content LIKE ? OR source_ref LIKE ? OR fact_key LIKE ?", pattern, pattern, pattern)
 	}
 
 	if err := q.Count(&result.Total).Error; err != nil {
@@ -686,6 +714,26 @@ func (s *AdminService) DeleteMemory(id uint) error {
 		return s.memDeleter.DeleteMemory(context.Background(), id)
 	}
 	return s.db.Delete(&memory.Memory{}, id).Error
+}
+
+func (s *AdminService) ArchiveMemory(id uint) error {
+	if s.memDeleter != nil {
+		return s.memDeleter.ArchiveMemory(context.Background(), id)
+	}
+	return s.db.Model(&memory.Memory{}).Where("id = ?", id).Updates(map[string]any{
+		"status":     memory.MemoryStatusArchived,
+		"updated_at": time.Now(),
+	}).Error
+}
+
+func (s *AdminService) RestoreMemoryToCandidate(id uint) error {
+	if s.memDeleter != nil {
+		return s.memDeleter.RestoreMemoryToCandidate(context.Background(), id)
+	}
+	return s.db.Model(&memory.Memory{}).Where("id = ?", id).Updates(map[string]any{
+		"status":     memory.MemoryStatusCandidate,
+		"updated_at": time.Now(),
+	}).Error
 }
 
 func (s *AdminService) stickerFilePath(fileName string) (string, error) {

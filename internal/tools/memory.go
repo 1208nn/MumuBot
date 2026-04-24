@@ -2,27 +2,19 @@ package tools
 
 import (
 	"context"
-	"fmt"
-	"mumu-bot/internal/llm"
 	"mumu-bot/internal/memory"
-	"strings"
+	"strconv"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
-	"github.com/cloudwego/eino/schema"
-	"go.uber.org/zap"
 )
 
 // ==================== 保存记忆工具 ====================
 
 // SaveMemoryInput 保存记忆的输入参数
 type SaveMemoryInput struct {
-	// Type 记忆类型：group_fact(群事实)、self_experience(自身经历)、conversation(对话)
-	Type string `json:"type" jsonschema:"enum=group_fact,enum=self_experience,enum=conversation,description=记忆类型：group_fact=群相关的长期事实、self_experience=你自己的经历和感受、conversation=对话中的重要信息"`
 	// Content 要记住的内容，用自然语言描述
 	Content string `json:"content" jsonschema:"description=要记住的内容，用自然语言描述清楚"`
-	// Importance 重要性评分，0-1之间
-	Importance float64 `json:"importance,omitempty" jsonschema:"minimum=0,maximum=1,description=重要性评分(0-1)，越重要越高"`
 	// RelatedUserID 相关的用户ID（可选）
 	RelatedUserID int64 `json:"related_user_id,omitempty" jsonschema:"description=如果这条记忆与某个群友相关，填写其QQ号，否则填0"`
 }
@@ -44,92 +36,53 @@ func saveMemoryFunc(ctx context.Context, input *SaveMemoryInput) (*SaveMemoryOut
 		return &SaveMemoryOutput{Success: false, Message: "内容不能为空"}, nil
 	}
 
-	// 验证记忆类型
-	validTypes := map[string]bool{
-		string(memory.MemoryTypeGroupFact):      true,
-		string(memory.MemoryTypeSelfExperience): true,
-		string(memory.MemoryTypeConversation):   true,
+	if tc.MessageID <= 0 {
+		return &SaveMemoryOutput{Success: false, Message: "当前消息来源缺失，暂时不能写入长期记忆"}, nil
 	}
-	if !validTypes[input.Type] {
-		return &SaveMemoryOutput{Success: false, Message: "无效的记忆类型，可选: group_fact, self_experience, conversation"}, nil
-	}
+	sourceRef := "message:" + strconv.FormatInt(tc.MessageID, 10)
 
-	// 向量相似度搜索
-	similarMems, err := tc.MemoryMgr.SearchSimilarMemories(ctx, input.Content, tc.GroupID, "", 30, 0.85)
-	if err == nil && len(similarMems) > 0 {
-		// 调用中档模型尝试合并相似记忆
-		midTierModel, err := llm.NewClientForTier(llm.TierMid)
-		if err == nil {
-			var oldContents []string
-			for _, m := range similarMems {
-				oldContents = append(oldContents, fmt.Sprintf("- %s", m.Content))
-			}
-
-			prompt := fmt.Sprintf(`你是一个 Agent 记忆管理员。现在模型试图保存一条新记忆，但发现与现有的记忆高度相似。
-请将新记忆与旧记忆合并，生成一条更完整、准确的记忆。
-
-旧记忆：
-%s
-
-新记忆：
-- %s
-
-要求：
-1. 保持客观、简洁。
-2. 如果新记忆包含旧记忆没有的细节，请补充进去。
-3. 如果新记忆是旧记忆的更新（例如状态变化），请以最新状态为准，但保留重要历史背景。
-4. 只输出合并后的记忆内容，不要包含其他废话。`, strings.Join(oldContents, "\n"), input.Content)
-
-			resp, err := midTierModel.Generate(ctx, []*schema.Message{
-				schema.UserMessage(prompt),
-			})
-
-			if err == nil && resp.Content != "" {
-				mergedContent := strings.TrimSpace(resp.Content)
-
-				// 更新最相似的那条记忆（通常是第一条），删除其他的
-				firstMem := similarMems[0]
-				if err := tc.MemoryMgr.UpdateMemoryContent(ctx, firstMem.ID, mergedContent); err != nil {
-					zap.L().Error("合并记忆更新失败", zap.Error(err))
-				} else {
-					// 删除其他重复的
-					for i := 1; i < len(similarMems); i++ {
-						_ = tc.MemoryMgr.DeleteMemory(ctx, similarMems[i].ID)
-					}
-
-					return &SaveMemoryOutput{Success: true, Message: "已合并并更新相似记忆"}, nil
-				}
-			}
-		} else {
-			zap.L().Warn("中档模型初始化失败，跳过记忆合并", zap.Error(err))
-		}
+	selfID := int64(0)
+	if tc.Bot != nil {
+		selfID = tc.Bot.GetSelfID()
 	}
 
-	// 如果没有相似记忆或合并失败，直接保存新记忆
-	mem := &memory.Memory{
-		Type:       memory.MemoryType(input.Type),
-		GroupID:    tc.GroupID,
-		UserID:     input.RelatedUserID,
-		Content:    input.Content,
-		Importance: input.Importance,
-	}
-
-	if err := tc.MemoryMgr.SaveMemory(ctx, mem); err != nil {
+	mem, action, err := tc.MemoryMgr.IngestMemory(ctx, memory.MemoryIngestInput{
+		GroupID:       tc.GroupID,
+		RelatedUserID: input.RelatedUserID,
+		SelfID:        selfID,
+		Content:       input.Content,
+		SourceKind:    memory.MemorySourceKindMessage,
+		SourceRef:     sourceRef,
+	})
+	if err != nil {
 		return &SaveMemoryOutput{Success: false, Message: err.Error()}, nil
 	}
+	if mem == nil {
+		return &SaveMemoryOutput{Success: true, Message: "这条信息先不进入长期记忆"}, nil
+	}
 
-	return &SaveMemoryOutput{Success: true, Message: "已记住"}, nil
+	switch action {
+	case "deduplicated":
+		return &SaveMemoryOutput{Success: true, Message: "已补充到已有记忆"}, nil
+	case "reinforced":
+		return &SaveMemoryOutput{Success: true, Message: "已增强已有记忆"}, nil
+	case "conflict-candidate":
+		return &SaveMemoryOutput{Success: true, Message: "已记为候选，等待后续证据收敛"}, nil
+	default:
+		if mem.Status == memory.MemoryStatusCandidate {
+			return &SaveMemoryOutput{Success: true, Message: "已暂存为候选记忆"}, nil
+		}
+		return &SaveMemoryOutput{Success: true, Message: "已记住"}, nil
+	}
 }
 
 // NewSaveMemoryTool 创建保存记忆工具
 func NewSaveMemoryTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"saveMemory",
-		`保存重要信息到长期记忆。当你发现以下情况时应该使用：
-- group_fact：群规、群特色、群里的重要事件、某个话题的结论等
-- self_experience：你参与的有趣对话、被@的经历、你的主观感受和想法
-- conversation：群友说的重要事情、有价值的信息、值得记住的对话内容
-注意：普通闲聊不需要保存，只保存真正有价值的信息。`,
+		`保存真正值得跨会话记住的信息。传入一条短摘要即可，系统会自动提取记忆类型、槽位和来源。
+适合保存的内容包括：稳定事实、长期偏好、群规边界、持续目标、值得追踪的经历。
+普通闲聊、短期待回复、临时口嗨不要保存。`,
 		saveMemoryFunc,
 	)
 }

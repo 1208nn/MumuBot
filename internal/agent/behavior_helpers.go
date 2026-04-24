@@ -80,26 +80,14 @@ func replyInfoFromMessageLog(log *memory.MessageLog) *onebot.ReplyInfo {
 	}
 }
 
-func parseInt64Value(v any) (int64, bool) {
-	switch value := v.(type) {
-	case int64:
-		return value, true
-	case int:
-		return int64(value), true
-	case float64:
-		return int64(value), true
-	case string:
-		parsed, err := strconv.ParseInt(value, 10, 64)
-		if err != nil {
-			return 0, false
-		}
-		return parsed, true
-	default:
-		return 0, false
+func messageLogBaseGroupMessage(log memory.MessageLog) *onebot.GroupMessage {
+	messageID, _ := strconv.ParseInt(log.MessageID, 10, 64)
+	return &onebot.GroupMessage{
+		MessageID:   messageID,
+		GroupID:     log.GroupID,
+		UserID:      log.UserID,
+		Nickname:    log.Nickname,
+		Time:        log.CreatedAt,
+		MessageType: log.MsgType,
 	}
-}
-
-func cloneReplyInfo(reply onebot.ReplyInfo) *onebot.ReplyInfo {
-	copy := reply
-	return &copy
 }

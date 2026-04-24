@@ -1,6 +1,11 @@
 package memory
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
+	"fmt"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -13,21 +18,206 @@ const (
 	MemoryTypeConversation   MemoryType = "conversation"    // 对话记忆（重要的对话内容、群友说的事）
 )
 
+type CanonicalMemoryType string
+
+const (
+	CanonicalMemoryTypeFact       CanonicalMemoryType = "fact"
+	CanonicalMemoryTypeEpisode    CanonicalMemoryType = "episode"
+	CanonicalMemoryTypePreference CanonicalMemoryType = "preference"
+	CanonicalMemoryTypeConstraint CanonicalMemoryType = "constraint"
+	CanonicalMemoryTypeGoal       CanonicalMemoryType = "goal"
+)
+
+type MemoryStatus string
+
+const (
+	MemoryStatusActive    MemoryStatus = "active"
+	MemoryStatusCandidate MemoryStatus = "candidate"
+	MemoryStatusArchived  MemoryStatus = "archived"
+	MemoryStatusLegacy    MemoryStatus = "legacy"
+)
+
+type MemorySourceKind string
+
+const (
+	MemorySourceKindMessage   MemorySourceKind = "message"
+	MemorySourceKindTopic     MemorySourceKind = "topic"
+	MemorySourceKindMigration MemorySourceKind = "migration"
+)
+
+type MemorySubjectClass string
+
+const (
+	MemorySubjectClassGroup   MemorySubjectClass = "group"
+	MemorySubjectClassSelf    MemorySubjectClass = "self"
+	MemorySubjectClassMember  MemorySubjectClass = "member"
+	MemorySubjectClassUnknown MemorySubjectClass = "unknown"
+)
+
+const (
+	MemoryOpenLoopGraceWindow = 72 * time.Hour
+)
+
+var (
+	slotAnchorSanitizer = regexp.MustCompile(`[^\p{Han}a-z0-9_]+`)
+	slotAnchorSplitters = regexp.MustCompile(`[\s\-]+`)
+)
+
 // Memory 长期记忆
 type Memory struct {
 	ID        uint      `gorm:"primarykey" json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
-	Type        MemoryType `gorm:"type:varchar(50);index" json:"type"`
-	GroupID     int64      `gorm:"index" json:"group_id"`
-	UserID      int64      `gorm:"index" json:"user_id,omitempty"`
-	Content     string     `gorm:"type:text" json:"content"`
-	Importance  float64    `gorm:"default:0.5" json:"importance"`
-	AccessCount int        `gorm:"default:0" json:"access_count"`
+	Type          MemoryType          `gorm:"type:varchar(50);index" json:"type"`
+	GroupID       int64               `gorm:"index" json:"group_id"`
+	UserID        int64               `gorm:"index" json:"user_id,omitempty"`
+	Content       string              `gorm:"type:text" json:"content"`
+	Importance    float64             `gorm:"default:0.5" json:"importance"`
+	AccessCount   int                 `gorm:"default:0" json:"access_count"`
+	CanonicalType CanonicalMemoryType `gorm:"type:varchar(32);index" json:"canonical_type"`
+	Status        MemoryStatus        `gorm:"type:varchar(20);index" json:"status"`
+	EvidenceCount int                 `gorm:"default:1" json:"evidence_count"`
+	SourceKind    MemorySourceKind    `gorm:"type:varchar(20);index" json:"source_kind"`
+	SourceRef     string              `gorm:"type:varchar(191);index" json:"source_ref"`
+	FactKey       string              `gorm:"type:varchar(191);index" json:"fact_key"`
 }
 
 func (Memory) TableName() string { return "memories" }
+
+func (m Memory) EffectiveStatus() MemoryStatus {
+	status := MemoryStatus(strings.TrimSpace(string(m.Status)))
+	if status == "" {
+		return MemoryStatusLegacy
+	}
+	return status
+}
+
+func (m Memory) RecallEligible() bool {
+	switch m.EffectiveStatus() {
+	case MemoryStatusActive:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m Memory) LegacyRecallEligible() bool {
+	return m.EffectiveStatus() == MemoryStatusLegacy
+}
+
+func IsKeyedCanonicalType(kind CanonicalMemoryType) bool {
+	switch kind {
+	case CanonicalMemoryTypeFact, CanonicalMemoryTypePreference, CanonicalMemoryTypeConstraint, CanonicalMemoryTypeGoal:
+		return true
+	default:
+		return false
+	}
+}
+
+func oldMemoryTypeFromSubject(subjectClass MemorySubjectClass) MemoryType {
+	switch subjectClass {
+	case MemorySubjectClassGroup:
+		return MemoryTypeGroupFact
+	case MemorySubjectClassSelf:
+		return MemoryTypeSelfExperience
+	case MemorySubjectClassMember:
+		return MemoryTypeConversation
+	default:
+		return MemoryTypeConversation
+	}
+}
+
+func scopeCodeFromMemoryType(kind MemoryType) string {
+	switch kind {
+	case MemoryTypeGroupFact:
+		return "gf"
+	case MemoryTypeSelfExperience:
+		return "se"
+	default:
+		return "cv"
+	}
+}
+
+func buildFactKey(kind MemoryType, subjectToken string, slotKind string, slotAnchor string) string {
+	subjectToken = strings.TrimSpace(subjectToken)
+	slotKind = strings.TrimSpace(slotKind)
+	slotAnchor = strings.TrimSpace(slotAnchor)
+	if subjectToken == "" || slotKind == "" || slotAnchor == "" {
+		return ""
+	}
+	hash := sha1.Sum([]byte(slotAnchor))
+	shortHash := hex.EncodeToString(hash[:])[:10]
+	return fmt.Sprintf("%s:%s:%s:%s", scopeCodeFromMemoryType(kind), subjectToken, slotKind, shortHash)
+}
+
+func normalizeSlotAnchor(raw string) string {
+	text := strings.TrimSpace(strings.ToLower(raw))
+	if text == "" {
+		return ""
+	}
+	text = slotAnchorSplitters.ReplaceAllString(text, "_")
+	text = slotAnchorSanitizer.ReplaceAllString(text, "_")
+	text = strings.Trim(text, "_")
+	if text == "" {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) > 32 {
+		text = string(runes[:32])
+	}
+	return strings.Trim(text, "_")
+}
+
+func subjectToken(subjectClass MemorySubjectClass, groupID int64, userID int64, selfID int64) string {
+	switch subjectClass {
+	case MemorySubjectClassGroup:
+		if groupID > 0 {
+			return fmt.Sprintf("g:%d", groupID)
+		}
+	case MemorySubjectClassSelf:
+		if selfID > 0 {
+			return fmt.Sprintf("self:%d", selfID)
+		}
+	case MemorySubjectClassMember:
+		if userID > 0 {
+			return fmt.Sprintf("u:%d", userID)
+		}
+	}
+	return ""
+}
+
+func importanceForStatus(kind CanonicalMemoryType, status MemoryStatus, evidenceCount int) float64 {
+	base := 0.45
+	switch kind {
+	case CanonicalMemoryTypeConstraint:
+		base = 0.82
+	case CanonicalMemoryTypeGoal:
+		base = 0.74
+	case CanonicalMemoryTypePreference:
+		base = 0.62
+	case CanonicalMemoryTypeEpisode:
+		base = 0.58
+	case CanonicalMemoryTypeFact:
+		base = 0.68
+	}
+	if status == MemoryStatusCandidate {
+		base -= 0.18
+	}
+	if status == MemoryStatusLegacy {
+		base -= 0.1
+	}
+	if evidenceCount > 1 {
+		base += float64(evidenceCount-1) * 0.05
+	}
+	if base < 0.1 {
+		return 0.1
+	}
+	if base > 0.98 {
+		return 0.98
+	}
+	return base
+}
 
 // MemberProfile 成员画像
 type MemberProfile struct {

@@ -402,6 +402,62 @@ func memoryTypeText(kind memory.MemoryType) string {
 	}
 }
 
+func memoryCanonicalTypeText(kind memory.CanonicalMemoryType) string {
+	switch kind {
+	case memory.CanonicalMemoryTypeFact:
+		return "事实"
+	case memory.CanonicalMemoryTypeEpisode:
+		return "经历"
+	case memory.CanonicalMemoryTypePreference:
+		return "偏好"
+	case memory.CanonicalMemoryTypeConstraint:
+		return "约束"
+	case memory.CanonicalMemoryTypeGoal:
+		return "目标"
+	default:
+		return "未归类"
+	}
+}
+
+func memoryStatusText(status memory.MemoryStatus) string {
+	switch status {
+	case memory.MemoryStatusCandidate:
+		return "待收敛"
+	case memory.MemoryStatusArchived:
+		return "已归档"
+	case memory.MemoryStatusLegacy:
+		return "旧版记录"
+	default:
+		return "生效中"
+	}
+}
+
+func memoryStatusClass(status memory.MemoryStatus) string {
+	switch status {
+	case memory.MemoryStatusCandidate:
+		return "inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-200"
+	case memory.MemoryStatusArchived:
+		return "inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200"
+	case memory.MemoryStatusLegacy:
+		return "inline-flex items-center rounded-full bg-violet-100 px-3 py-1 text-xs font-semibold text-violet-700 ring-1 ring-violet-200"
+	default:
+		return "inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200"
+	}
+}
+
+func memorySourceKindText(kind memory.MemorySourceKind) string {
+	switch kind {
+	case memory.MemorySourceKindTopic:
+		return "话题沉淀"
+	case memory.MemorySourceKindMigration:
+		return "旧版迁入"
+	case memory.MemorySourceKindMessage:
+		return "消息学习"
+	default:
+		return "未标注"
+	}
+}
+
 func avatarText(value string) string {
 	if isPlaceholderText(value) {
 		return "友"
@@ -449,32 +505,40 @@ func rowActionClass(action RowAction) string {
 }
 
 func styleCardActionDialogHref(id uint, status string) string {
-	values := neturl.Values{}
-	values.Set("action_kind", "style-card-status")
-	values.Set("action_id", strconv.FormatUint(uint64(id), 10))
-	values.Set("status", strings.TrimSpace(status))
-	return "/admin/dialogs/actions?" + values.Encode()
+	return adminActionDialogHref("style-card-status", id, map[string]string{"status": status})
 }
 
 func jargonActionDialogHref(id uint, status string) string {
-	values := neturl.Values{}
-	values.Set("action_kind", "jargon-status")
-	values.Set("action_id", strconv.FormatUint(uint64(id), 10))
-	values.Set("status", strings.TrimSpace(status))
-	return "/admin/dialogs/actions?" + values.Encode()
+	return adminActionDialogHref("jargon-status", id, map[string]string{"status": status})
 }
 
 func stickerDeleteDialogHref(id uint) string {
-	values := neturl.Values{}
-	values.Set("action_kind", "sticker-delete")
-	values.Set("action_id", strconv.FormatUint(uint64(id), 10))
-	return "/admin/dialogs/actions?" + values.Encode()
+	return adminActionDialogHref("sticker-delete", id, nil)
 }
 
 func memoryDeleteDialogHref(id uint) string {
+	return adminActionDialogHref("memory-delete", id, nil)
+}
+
+func memoryArchiveDialogHref(id uint) string {
+	return adminActionDialogHref("memory-archive", id, nil)
+}
+
+func memoryRestoreDialogHref(id uint) string {
+	return adminActionDialogHref("memory-restore", id, nil)
+}
+
+func adminActionDialogHref(kind string, id uint, extra map[string]string) string {
 	values := neturl.Values{}
-	values.Set("action_kind", "memory-delete")
+	values.Set("action_kind", kind)
 	values.Set("action_id", strconv.FormatUint(uint64(id), 10))
+	for key, value := range extra {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		values.Set(key, value)
+	}
 	return "/admin/dialogs/actions?" + values.Encode()
 }
 
@@ -653,6 +717,46 @@ func MemoryDeleteDialogData(item memory.Memory, returnTo string) AdminActionDial
 		},
 		Hidden: []AdminActionHiddenField{
 			{Name: "action_kind", Value: "memory-delete"},
+			{Name: "action_id", Value: strconv.FormatUint(uint64(item.ID), 10)},
+		},
+		ReturnTo: returnTo,
+	}
+}
+
+func MemoryArchiveDialogData(item memory.Memory, returnTo string) AdminActionDialogContentData {
+	action := RowAction{Kind: "ghost", BusyLabel: "归档中"}
+	return AdminActionDialogContentData{
+		Title:       "归档记忆",
+		Body:        "归档后默认不再参与召回，但仍保留在历史里，之后可以重新放回待收敛区。",
+		SubmitLabel: "确认归档",
+		SubmitClass: modalActionClass(action),
+		BusyLabel:   action.BusyLabel,
+		Fields: []AdminActionField{
+			{Label: "记忆内容", Value: item.Content},
+			{Label: "当前状态", Value: memoryStatusText(item.EffectiveStatus())},
+		},
+		Hidden: []AdminActionHiddenField{
+			{Name: "action_kind", Value: "memory-archive"},
+			{Name: "action_id", Value: strconv.FormatUint(uint64(item.ID), 10)},
+		},
+		ReturnTo: returnTo,
+	}
+}
+
+func MemoryRestoreDialogData(item memory.Memory, returnTo string) AdminActionDialogContentData {
+	action := RowAction{Kind: "approve", BusyLabel: "恢复中"}
+	return AdminActionDialogContentData{
+		Title:       "恢复到待收敛",
+		Body:        "恢复后会重新进入待收敛区，后续仍需新的证据继续确认，不会直接恢复为生效中。",
+		SubmitLabel: "确认恢复",
+		SubmitClass: modalActionClass(action),
+		BusyLabel:   action.BusyLabel,
+		Fields: []AdminActionField{
+			{Label: "记忆内容", Value: item.Content},
+			{Label: "当前状态", Value: memoryStatusText(item.EffectiveStatus())},
+		},
+		Hidden: []AdminActionHiddenField{
+			{Name: "action_kind", Value: "memory-restore"},
 			{Name: "action_id", Value: strconv.FormatUint(uint64(item.ID), 10)},
 		},
 		ReturnTo: returnTo,

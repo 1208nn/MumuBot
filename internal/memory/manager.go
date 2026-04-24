@@ -10,10 +10,34 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudwego/eino/components/model"
+	agentreact "github.com/cloudwego/eino/flow/agent/react"
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
+
+type MemoryIngestInput struct {
+	GroupID               int64
+	RelatedUserID         int64
+	SelfID                int64
+	LegacyTypeHint        MemoryType
+	Content               string
+	SourceKind            MemorySourceKind
+	SourceRef             string
+	SubjectCandidates     []TopicParticipantRef
+	AllowedCanonicalTypes []CanonicalMemoryType
+}
+
+type TopicMemoryCandidateInput struct {
+	GroupID               int64
+	TopicID               uint
+	SelfID                int64
+	Claims                []string
+	LegacyType            MemoryType
+	Participants          []TopicParticipantRef
+	AllowedCanonicalTypes []CanonicalMemoryType
+}
 
 // EmbeddingProvider 向量嵌入接口
 type EmbeddingProvider interface {
@@ -33,6 +57,7 @@ type vectorStore interface {
 type Manager struct {
 	db              *gorm.DB
 	embedding       EmbeddingProvider
+	claimExtractor  *agentreact.Agent
 	milvus          vectorStore // Memory 向量存储
 	styleCardMilvus vectorStore // StyleCard 向量存储
 	topicMilvus     vectorStore // Topic 摘要向量存储
@@ -40,7 +65,7 @@ type Manager struct {
 }
 
 // NewManager 创建记忆管理器
-func NewManager(embedding EmbeddingProvider) (*Manager, error) {
+func NewManager(embedding EmbeddingProvider, claimModel model.ToolCallingChatModel) (*Manager, error) {
 	if embedding == nil {
 		return nil, fmt.Errorf("embedding 未初始化，Milvus 为强制依赖")
 	}
@@ -138,12 +163,18 @@ func NewManager(embedding EmbeddingProvider) (*Manager, error) {
 		topicMilvus:     topicMilvusClient,
 		cleanupStop:     make(chan struct{}),
 	}
+	if claimExtractor, err := newMemoryClaimExtractor(claimModel); err != nil {
+		zap.L().Warn("初始化长期记忆提取器失败，将回退到保守规则", zap.Error(err))
+	} else {
+		m.claimExtractor = claimExtractor
+	}
 
 	// 启动消息日志清理任务
 	m.startMessageLogCleanup()
 
 	// 启动情绪衰减任务
 	m.startMoodDecay()
+	m.startMemoryConvergence()
 
 	return m, nil
 }
@@ -208,14 +239,17 @@ func (m *Manager) SearchSimilarMemories(ctx context.Context, text string, groupI
 	if err != nil {
 		return nil, err
 	}
-
-	return results, nil
+	return prioritizeRecallMemories(results, limit), nil
 }
 
 // UpdateMemoryContent 更新记忆内容（用于合并）
 func (m *Manager) UpdateMemoryContent(ctx context.Context, id uint, newContent string) error {
 	// 更新数据库
-	if err := m.db.Model(&Memory{}).Where("id = ?", id).Update("content", newContent).Error; err != nil {
+	updates := map[string]any{
+		"content":    newContent,
+		"updated_at": time.Now(),
+	}
+	if err := m.db.Model(&Memory{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return err
 	}
 
@@ -234,6 +268,24 @@ func (m *Manager) UpdateMemoryContent(ctx context.Context, id uint, newContent s
 	return nil
 }
 
+func (m *Manager) UpdateMemberProfileLearned(profile *MemberProfile) error {
+	if profile == nil {
+		return nil
+	}
+	var existing MemberProfile
+	err := m.db.Where("user_id = ?", profile.UserID).First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		profile.Activity = applyActivityUpdate(profile.Activity, time.Time{}, profile.LastSpeak)
+		return m.db.Create(profile).Error
+	}
+	if err != nil {
+		return err
+	}
+	profile.ID = existing.ID
+	profile.Activity = applyActivityUpdate(profile.Activity, existing.LastSpeak, profile.LastSpeak)
+	return m.db.Save(profile).Error
+}
+
 // DeleteMemory 删除记忆
 func (m *Manager) DeleteMemory(ctx context.Context, id uint) error {
 	if err := m.db.Delete(&Memory{}, id).Error; err != nil {
@@ -245,8 +297,48 @@ func (m *Manager) DeleteMemory(ctx context.Context, id uint) error {
 	return nil
 }
 
+func (m *Manager) ArchiveMemory(ctx context.Context, id uint) error {
+	return m.db.WithContext(ctx).
+		Model(&Memory{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"status":     MemoryStatusArchived,
+			"updated_at": time.Now(),
+		}).Error
+}
+
+func (m *Manager) RestoreMemoryToCandidate(ctx context.Context, id uint) error {
+	return m.db.WithContext(ctx).
+		Model(&Memory{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"status":     MemoryStatusCandidate,
+			"updated_at": time.Now(),
+		}).Error
+}
+
 // SaveMemory 保存长期记忆
 func (m *Manager) SaveMemory(ctx context.Context, mem *Memory) error {
+	if mem == nil {
+		return nil
+	}
+	mem.Content = strings.TrimSpace(mem.Content)
+	if mem.Content == "" {
+		return fmt.Errorf("记忆内容不能为空")
+	}
+	if mem.EvidenceCount <= 0 {
+		mem.EvidenceCount = 1
+	}
+	if mem.Status == "" {
+		mem.Status = MemoryStatusActive
+	}
+	if mem.CanonicalType == "" {
+		mem.CanonicalType = fallbackCanonicalTypeFromLegacy(mem.Type)
+	}
+	if mem.Importance <= 0 {
+		mem.Importance = importanceForStatus(mem.CanonicalType, mem.Status, mem.EvidenceCount)
+	}
+
 	// 生成 embedding
 	var embedding []float64
 	if m.embedding != nil {
@@ -271,13 +363,290 @@ func (m *Manager) SaveMemory(ctx context.Context, mem *Memory) error {
 	return nil
 }
 
+func (m *Manager) IngestMemory(ctx context.Context, input MemoryIngestInput) (*Memory, string, error) {
+	content := strings.TrimSpace(input.Content)
+	if content == "" {
+		return nil, "ignored", nil
+	}
+	if input.SourceKind == "" {
+		input.SourceKind = MemorySourceKindMessage
+	}
+	if input.SourceRef == "" && input.SourceKind == MemorySourceKindMessage {
+		return nil, "", fmt.Errorf("消息来源缺少 source_ref")
+	}
+
+	claim := m.extractNormalizedClaim(ctx, input, content)
+	if claim.CanonicalType == "" {
+		return nil, "ignored", nil
+	}
+	if len(input.AllowedCanonicalTypes) > 0 && !containsCanonicalType(input.AllowedCanonicalTypes, claim.CanonicalType) {
+		return nil, "ignored", nil
+	}
+	relatedUserID := input.RelatedUserID
+	if relatedUserID == 0 {
+		relatedUserID = resolveSubjectCandidateUserID(claim.SubjectName, input.SubjectCandidates)
+	}
+	subjectClass := claim.SubjectClass
+	subjectTokenValue := subjectToken(subjectClass, input.GroupID, relatedUserID, input.SelfID)
+
+	status := MemoryStatusCandidate
+	if input.SourceKind == MemorySourceKindMigration {
+		status = MemoryStatusLegacy
+	}
+	if claim.CanonicalType == CanonicalMemoryTypeEpisode && input.SourceKind == MemorySourceKindMessage && subjectClass == MemorySubjectClassSelf {
+		status = MemoryStatusActive
+	}
+	if claim.CanonicalType == CanonicalMemoryTypeGoal && !claim.LongTerm {
+		return nil, "ignored", nil
+	}
+
+	memType := oldMemoryTypeFromSubject(subjectClass)
+	factKey := ""
+	if IsKeyedCanonicalType(claim.CanonicalType) && subjectClass != MemorySubjectClassUnknown {
+		factKey = buildFactKey(memType, subjectTokenValue, claim.SlotKind, claim.SlotAnchor)
+	}
+
+	if claim.CanonicalType == CanonicalMemoryTypeEpisode {
+		var existing Memory
+		episodeQuery := m.db.WithContext(ctx).Where("group_id = ? AND source_ref = ? AND content = ?", input.GroupID, input.SourceRef, content)
+		err := episodeQuery.First(&existing).Error
+		if err == nil {
+			updates := map[string]any{
+				"updated_at":     time.Now(),
+				"evidence_count": gorm.Expr("GREATEST(evidence_count, ?)", 1),
+				"importance":     importanceForStatus(existing.CanonicalType, existing.EffectiveStatus(), existing.EvidenceCount),
+			}
+			if updateErr := m.db.WithContext(ctx).Model(&Memory{}).Where("id = ?", existing.ID).Updates(updates).Error; updateErr != nil {
+				return nil, "", updateErr
+			}
+			if fetchErr := m.db.WithContext(ctx).First(&existing, existing.ID).Error; fetchErr == nil {
+				return &existing, "deduplicated", nil
+			}
+			return &existing, "deduplicated", nil
+		}
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, "", err
+		}
+		mem := &Memory{
+			Type:          memType,
+			GroupID:       input.GroupID,
+			UserID:        relatedUserID,
+			Content:       content,
+			CanonicalType: claim.CanonicalType,
+			Status:        status,
+			EvidenceCount: 1,
+			SourceKind:    input.SourceKind,
+			SourceRef:     input.SourceRef,
+			Importance:    importanceForStatus(claim.CanonicalType, status, 1),
+		}
+		if err := m.SaveMemory(ctx, mem); err != nil {
+			return nil, "", err
+		}
+		return mem, "created", nil
+	}
+
+	if factKey != "" {
+		var existing Memory
+		err := m.db.WithContext(ctx).
+			Where("group_id = ? AND canonical_type = ? AND fact_key = ? AND status <> ?", input.GroupID, claim.CanonicalType, factKey, MemoryStatusArchived).
+			Order("id DESC").
+			First(&existing).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, "", err
+		}
+		if err == nil {
+			if m.sameClaimValue(ctx, existing, input, claim, content) {
+				updates := map[string]any{
+					"updated_at":  time.Now(),
+					"source_kind": input.SourceKind,
+					"source_ref":  input.SourceRef,
+				}
+				action := "deduplicated"
+				nextEvidenceCount := existing.EvidenceCount
+				nextStatus := existing.EffectiveStatus()
+				if existing.SourceRef != input.SourceRef {
+					updates["evidence_count"] = gorm.Expr("evidence_count + 1")
+					nextEvidenceCount++
+					action = "reinforced"
+				}
+				if existing.EffectiveStatus() == MemoryStatusCandidate && canPromoteCandidate(existing, input.SourceKind, nextEvidenceCount) {
+					nextStatus = MemoryStatusActive
+					updates["status"] = nextStatus
+				}
+				updates["importance"] = importanceForStatus(existing.CanonicalType, nextStatus, nextEvidenceCount)
+				if updateErr := m.db.WithContext(ctx).Model(&Memory{}).Where("id = ?", existing.ID).Updates(updates).Error; updateErr != nil {
+					return nil, "", updateErr
+				}
+				_ = m.db.WithContext(ctx).First(&existing, existing.ID).Error
+				return &existing, action, nil
+			}
+			mem := &Memory{
+				Type:          memType,
+				GroupID:       input.GroupID,
+				UserID:        relatedUserID,
+				Content:       content,
+				CanonicalType: claim.CanonicalType,
+				Status:        MemoryStatusCandidate,
+				EvidenceCount: 1,
+				SourceKind:    input.SourceKind,
+				SourceRef:     input.SourceRef,
+				FactKey:       factKey,
+				Importance:    importanceForStatus(claim.CanonicalType, MemoryStatusCandidate, 1),
+			}
+			if err := m.SaveMemory(ctx, mem); err != nil {
+				return nil, "", err
+			}
+			return mem, "conflict-candidate", nil
+		}
+	}
+
+	mem := &Memory{
+		Type:          memType,
+		GroupID:       input.GroupID,
+		UserID:        relatedUserID,
+		Content:       content,
+		CanonicalType: claim.CanonicalType,
+		Status:        status,
+		EvidenceCount: 1,
+		SourceKind:    input.SourceKind,
+		SourceRef:     input.SourceRef,
+		FactKey:       factKey,
+		Importance:    importanceForStatus(claim.CanonicalType, status, 1),
+	}
+	if err := m.SaveMemory(ctx, mem); err != nil {
+		return nil, "", err
+	}
+	return mem, "created", nil
+}
+
+func (m *Manager) UpsertTopicMemoryCandidate(ctx context.Context, input TopicMemoryCandidateInput) ([]Memory, error) {
+	if input.TopicID == 0 || input.GroupID == 0 || len(input.Claims) == 0 {
+		return nil, nil
+	}
+
+	created := make([]Memory, 0, len(input.Claims))
+	seen := make(map[string]struct{}, len(input.Claims))
+	for idx, line := range input.Claims {
+		line = strings.TrimSpace(strings.TrimLeft(line, "-•*1234567890. "))
+		if line == "" {
+			continue
+		}
+		if _, ok := seen[line]; ok {
+			continue
+		}
+		seen[line] = struct{}{}
+
+		mem, action, err := m.IngestMemory(ctx, MemoryIngestInput{
+			GroupID:               input.GroupID,
+			SelfID:                input.SelfID,
+			LegacyTypeHint:        input.LegacyType,
+			Content:               line,
+			SourceKind:            MemorySourceKindTopic,
+			SourceRef:             fmt.Sprintf("topic:%d", input.TopicID),
+			SubjectCandidates:     input.Participants,
+			AllowedCanonicalTypes: input.AllowedCanonicalTypes,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if mem == nil {
+			continue
+		}
+		if mem.Status == MemoryStatusCandidate && canPromoteCandidate(*mem, MemorySourceKindTopic, mem.EvidenceCount) {
+			now := time.Now()
+			if err := m.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+				if err := tx.Model(&Memory{}).Where("id = ?", mem.ID).Updates(map[string]any{
+					"status":     MemoryStatusActive,
+					"importance": importanceForStatus(mem.CanonicalType, MemoryStatusActive, mem.EvidenceCount),
+					"updated_at": now,
+				}).Error; err != nil {
+					return err
+				}
+				if mem.FactKey == "" {
+					return nil
+				}
+				return tx.Model(&Memory{}).
+					Where("id <> ? AND group_id = ? AND canonical_type = ? AND fact_key = ? AND status = ?", mem.ID, mem.GroupID, mem.CanonicalType, mem.FactKey, MemoryStatusActive).
+					Updates(map[string]any{
+						"status":     MemoryStatusArchived,
+						"updated_at": now,
+					}).Error
+			}); err == nil && m.db.WithContext(ctx).First(mem, mem.ID).Error == nil {
+				created = append(created, *mem)
+				continue
+			}
+		}
+		if action != "ignored" {
+			created = append(created, *mem)
+		}
+		if idx >= 11 {
+			break
+		}
+	}
+	return created, nil
+}
+
+func (m *Manager) RunMemoryConvergence(ctx context.Context, now time.Time) error {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return m.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var stale []Memory
+		if err := tx.
+			Where("status = ? AND updated_at < ?", MemoryStatusCandidate, now.Add(-MemoryOpenLoopGraceWindow)).
+			Find(&stale).Error; err != nil {
+			return err
+		}
+		for _, item := range stale {
+			if item.FactKey == "" && item.CanonicalType != CanonicalMemoryTypeEpisode {
+				if err := tx.Model(&Memory{}).Where("id = ?", item.ID).Updates(map[string]any{
+					"status":     MemoryStatusArchived,
+					"updated_at": now,
+				}).Error; err != nil {
+					return err
+				}
+				continue
+			}
+			if canPromoteCandidate(item, item.SourceKind, item.EvidenceCount) {
+				if err := tx.Model(&Memory{}).Where("id = ?", item.ID).Updates(map[string]any{
+					"status":     MemoryStatusActive,
+					"updated_at": now,
+				}).Error; err != nil {
+					return err
+				}
+				if item.FactKey != "" {
+					if err := tx.Model(&Memory{}).
+						Where("id <> ? AND group_id = ? AND canonical_type = ? AND fact_key = ? AND status = ?", item.ID, item.GroupID, item.CanonicalType, item.FactKey, MemoryStatusActive).
+						Updates(map[string]any{
+							"status":     MemoryStatusArchived,
+							"updated_at": now,
+						}).Error; err != nil {
+						return err
+					}
+				}
+				continue
+			}
+			if err := tx.Model(&Memory{}).Where("id = ?", item.ID).Updates(map[string]any{
+				"status":     MemoryStatusArchived,
+				"updated_at": now,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // QueryMemory 查询相关记忆
 func (m *Manager) QueryMemory(ctx context.Context, query string, groupID int64, memType MemoryType, limit int) ([]Memory, error) {
 	// 尝试 Milvus 向量搜索
 	if m.milvus != nil && m.embedding != nil {
 		if emb, err := m.embedding.Embed(ctx, query); err == nil {
 			if results, err := m.milvusVectorSearch(ctx, emb, groupID, string(memType), limit, 0.7); err == nil && len(results) > 0 {
-				return results, nil
+				filtered := prioritizeRecallMemories(results, limit)
+				if len(filtered) > 0 {
+					return filtered, nil
+				}
 			}
 		}
 	}
@@ -291,6 +660,7 @@ func (m *Manager) QueryMemory(ctx context.Context, query string, groupID int64, 
 	if memType != "" {
 		q = q.Where("type = ?", memType)
 	}
+	q = q.Where("(status = ? OR status = ? OR status = '')", MemoryStatusActive, MemoryStatusLegacy)
 	keywords := strings.Fields(query)
 	if len(keywords) == 0 {
 		return memories, nil
@@ -319,7 +689,7 @@ func (m *Manager) QueryMemory(ctx context.Context, query string, groupID int64, 
 		}).Error
 	}
 
-	return memories, nil
+	return prioritizeRecallMemories(memories, limit), nil
 }
 
 // startMessageLogCleanup 启动消息日志清理定时任务
@@ -351,6 +721,27 @@ func (m *Manager) startMessageLogCleanup() {
 			select {
 			case <-ticker.C:
 				m.cleanupMessageLogs(keepLatest)
+			case <-m.cleanupStop:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+}
+
+func (m *Manager) startMemoryConvergence() {
+	ticker := time.NewTicker(15 * time.Minute)
+
+	go func() {
+		if err := m.RunMemoryConvergence(context.Background(), time.Now()); err != nil {
+			zap.L().Warn("启动时运行长期记忆收敛失败", zap.Error(err))
+		}
+		for {
+			select {
+			case <-ticker.C:
+				if err := m.RunMemoryConvergence(context.Background(), time.Now()); err != nil {
+					zap.L().Warn("长期记忆收敛失败", zap.Error(err))
+				}
 			case <-m.cleanupStop:
 				ticker.Stop()
 				return
@@ -693,6 +1084,7 @@ func (m *Manager) refreshStyleCardVector(ctx context.Context, card *StyleCard) e
 }
 
 func shouldPreferShorterText(existing, candidate string) bool {
+	// 例句类字段越短越像可复用证据，合并风格卡片时优先保留更紧凑的非空表达。
 	existing = strings.TrimSpace(existing)
 	candidate = strings.TrimSpace(candidate)
 	switch {
@@ -706,6 +1098,7 @@ func shouldPreferShorterText(existing, candidate string) bool {
 }
 
 func shouldPreferLongerText(existing, candidate string) bool {
+	// 规则类字段需要足够上下文才可复用，合并时优先保留信息更完整的非空表达。
 	existing = strings.TrimSpace(existing)
 	candidate = strings.TrimSpace(candidate)
 	switch {
@@ -961,6 +1354,100 @@ func (m *Manager) Close() error {
 }
 
 func (m *Manager) GetDB() *gorm.DB { return m.db }
+
+func canPromoteCandidate(mem Memory, sourceKind MemorySourceKind, evidenceCount int) bool {
+	if mem.CanonicalType == CanonicalMemoryTypeEpisode {
+		return sourceKind == MemorySourceKindTopic
+	}
+	if mem.FactKey == "" {
+		return false
+	}
+	if sourceKind == MemorySourceKindTopic {
+		return true
+	}
+	return evidenceCount >= 2
+}
+
+func containsCanonicalType(allowed []CanonicalMemoryType, kind CanonicalMemoryType) bool {
+	for _, candidate := range allowed {
+		if candidate == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeComparableText(raw string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(strings.ToLower(raw))), "")
+}
+
+func (m *Manager) sameClaimValue(ctx context.Context, existing Memory, input MemoryIngestInput, incoming NormalizedClaim, content string) bool {
+	existingContent := normalizeComparableText(existing.Content)
+	incomingContent := normalizeComparableText(content)
+	if existingContent != "" && existingContent == incomingContent {
+		return true
+	}
+
+	incomingValue := normalizeComparableText(incoming.ValueSummary)
+	if incomingValue == "" {
+		incomingValue = incomingContent
+	}
+	if incomingValue == "" {
+		return false
+	}
+	if existingContent == incomingValue {
+		return true
+	}
+
+	existingClaim := m.extractNormalizedClaim(ctx, MemoryIngestInput{
+		GroupID:               existing.GroupID,
+		RelatedUserID:         existing.UserID,
+		SelfID:                input.SelfID,
+		LegacyTypeHint:        existing.Type,
+		Content:               existing.Content,
+		SourceKind:            existing.SourceKind,
+		SourceRef:             existing.SourceRef,
+		SubjectCandidates:     input.SubjectCandidates,
+		AllowedCanonicalTypes: input.AllowedCanonicalTypes,
+	}, existing.Content)
+	existingValue := normalizeComparableText(existingClaim.ValueSummary)
+	if existingValue == "" {
+		existingValue = existingContent
+	}
+	return existingValue != "" && existingValue == incomingValue
+}
+
+func prioritizeRecallMemories(memories []Memory, limit int) []Memory {
+	if limit <= 0 || limit > len(memories) {
+		limit = len(memories)
+	}
+
+	active := make([]Memory, 0, len(memories))
+	legacy := make([]Memory, 0, len(memories))
+	for _, mem := range memories {
+		switch mem.EffectiveStatus() {
+		case MemoryStatusActive:
+			active = append(active, mem)
+		case MemoryStatusLegacy:
+			legacy = append(legacy, mem)
+		}
+	}
+
+	result := make([]Memory, 0, limit)
+	for _, mem := range active {
+		if len(result) >= limit {
+			return result
+		}
+		result = append(result, mem)
+	}
+	for _, mem := range legacy {
+		if len(result) >= limit {
+			return result
+		}
+		result = append(result, mem)
+	}
+	return result
+}
 
 // ==================== 表情包管理 ====================
 

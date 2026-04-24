@@ -98,6 +98,7 @@ func sortTopicCandidates(candidates []topicCandidate) []topicCandidate {
 }
 
 func scoreTopicCandidate(candidate topicCandidate) float64 {
+	// 回复命中是最强的话题归属信号；语义分是主分，参与者和关键词只做轻微修正。
 	score := candidate.SemanticScore
 	score += candidate.ParticipantOverlap * 0.08
 	score += candidate.KeywordContinuity * 0.07

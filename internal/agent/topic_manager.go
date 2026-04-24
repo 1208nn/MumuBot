@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -16,6 +15,7 @@ import (
 	"mumu-bot/internal/onebot"
 
 	"github.com/cloudwego/eino/components/model"
+	agentreact "github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 	"go.uber.org/zap"
 )
@@ -101,12 +101,12 @@ type PersistMessageResult struct {
 }
 
 type TopicManager struct {
-	ctx         context.Context
-	store       topicMemoryStore
-	model       model.ToolCallingChatModel
-	summaryFn   topicSummaryFunc
-	groupStates map[int64]*topicGroupState
-	groupLocks  map[int64]*sync.Mutex
+	ctx              context.Context
+	store            topicMemoryStore
+	summaryExtractor *agentreact.Agent
+	summaryFn        topicSummaryFunc
+	groupStates      map[int64]*topicGroupState
+	groupLocks       map[int64]*sync.Mutex
 
 	statesMu sync.RWMutex
 	locksMu  sync.Mutex
@@ -126,12 +126,16 @@ func NewTopicManager(ctx context.Context, store topicMemoryStore, chatModel mode
 	tm := &TopicManager{
 		ctx:             ctx,
 		store:           store,
-		model:           chatModel,
 		groupStates:     make(map[int64]*topicGroupState),
 		groupLocks:      make(map[int64]*sync.Mutex),
 		summaryQueue:    make(chan topicSummaryTask, 128),
 		stopCh:          make(chan struct{}),
 		summaryInFlight: make(map[uint]*topicSummaryCall),
+	}
+	if summaryExtractor, err := newTopicSummaryExtractor(chatModel); err != nil {
+		zap.L().Warn("初始化话题摘要提取器失败", zap.Error(err))
+	} else {
+		tm.summaryExtractor = summaryExtractor
 	}
 	tm.summaryFn = tm.generateSummary
 	tm.wg.Add(1)
@@ -1004,8 +1008,8 @@ func (tm *TopicManager) getGroupLock(groupID int64) *sync.Mutex {
 }
 
 func (tm *TopicManager) generateSummary(ctx context.Context, oldSummary memory.TopicSummaryV1, newMessages []memory.MessageLog) (memory.TopicSummaryV1, error) {
-	if tm.model == nil {
-		return memory.TopicSummaryV1{}, fmt.Errorf("topic summary model not configured")
+	if tm.summaryExtractor == nil {
+		return memory.TopicSummaryV1{}, fmt.Errorf("topic summary extractor not configured")
 	}
 
 	var msgLines []string
@@ -1024,47 +1028,30 @@ func (tm *TopicManager) generateSummary(ctx context.Context, oldSummary memory.T
 	if err != nil {
 		return memory.TopicSummaryV1{}, err
 	}
-	prompt := fmt.Sprintf("请根据旧摘要和新增消息，输出最新的话题摘要 JSON。只输出 JSON，不要解释。\n字段固定为 version,title,gist,facts,participants,open_loops,recent_turns,keywords。\nparticipants 中每项包含 nickname 和 position。\n旧摘要：%s\n新增消息：\n%s", oldSummaryJSON, strings.Join(msgLines, "\n"))
-	resp, err := tm.model.Generate(ctx, []*schema.Message{
-		schema.SystemMessage("你负责维护群聊当前话题的结构化摘要。输出必须是合法 JSON。"),
+	target := &topicSummarySubmission{}
+	summaryCtx, cancel := context.WithTimeout(withTopicSummaryTarget(ctx, target), 30*time.Second)
+	defer cancel()
+
+	prompt := fmt.Sprintf("请根据旧摘要和新增消息，调用一次 %s 工具提交最新的话题摘要，不要输出普通文本。\n字段固定为 title,gist,facts,participants,open_loops,recent_turns,keywords。\nfacts 只写已经确认且对后续有用的稳定事实；open_loops 只写尚未解决、后续可能要接上的事项；recent_turns 保留近期推进，不复述全部聊天。\nparticipants 中每项包含 nickname 和 position。\n旧摘要：%s\n新增消息：\n%s", topicSummaryToolName, oldSummaryJSON, strings.Join(msgLines, "\n"))
+	_, err = tm.summaryExtractor.Generate(summaryCtx, []*schema.Message{
+		schema.SystemMessage("你负责维护群聊当前话题的结构化摘要。你必须调用工具提交结果，不要输出普通文本。"),
 		schema.UserMessage(prompt),
-	})
+	}, buildTopicSummaryOptions()...)
 	if err != nil {
 		return memory.TopicSummaryV1{}, err
 	}
 
-	raw := strings.TrimSpace(resp.Content)
-	raw = strings.TrimPrefix(raw, "```json")
-	raw = strings.TrimPrefix(raw, "```")
-	raw = strings.TrimSuffix(raw, "```")
-	raw = strings.TrimSpace(raw)
-
-	var summary memory.TopicSummaryV1
-	if err := json.Unmarshal([]byte(raw), &summary); err != nil {
-		return memory.TopicSummaryV1{}, err
-	}
-	if summary.Version == 0 {
-		summary.Version = 1
-	}
-	return summary, nil
+	return normalizeTopicSummarySubmission(target), nil
 }
 
 func messageLogToGroupMessage(log memory.MessageLog) *onebot.GroupMessage {
-	msgID, _ := strconv.ParseInt(log.MessageID, 10, 64)
-	content := strings.TrimSpace(log.OriginalContent)
-	if content == "" {
-		content = strings.TrimSpace(log.Content)
+	msg := messageLogBaseGroupMessage(log)
+	msg.Content = strings.TrimSpace(log.OriginalContent)
+	if msg.Content == "" {
+		msg.Content = strings.TrimSpace(log.Content)
 	}
-	return &onebot.GroupMessage{
-		MessageID:    msgID,
-		GroupID:      log.GroupID,
-		UserID:       log.UserID,
-		Nickname:     log.Nickname,
-		Content:      content,
-		FinalContent: strings.TrimSpace(log.Content),
-		Time:         log.CreatedAt,
-		MessageType:  log.MsgType,
-	}
+	msg.FinalContent = strings.TrimSpace(log.Content)
+	return msg
 }
 
 func cloneGroupMessage(msg *onebot.GroupMessage) *onebot.GroupMessage {

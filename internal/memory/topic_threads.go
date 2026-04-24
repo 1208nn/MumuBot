@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mumu-bot/internal/config"
 	"sort"
 	"strings"
 	"time"
@@ -211,6 +212,42 @@ func (m *Manager) UpdateTopicSummary(ctx context.Context, topicID uint, summary 
 	})
 	if err != nil || !updated {
 		return err
+	}
+
+	topic, fetchErr := m.GetTopicThread(ctx, topicID)
+	if fetchErr == nil && topic != nil {
+		summary := ParseTopicSummary(topic.SummaryJSON)
+		participants, participantsErr := m.ListRecentTopicParticipants(ctx, topic.ID, TopicTailKeepMessages)
+		if participantsErr != nil {
+			zap.L().Warn("读取话题参与者失败，长期记忆主体解析可能退化", zap.Uint("topic_id", topic.ID), zap.Error(participantsErr))
+		}
+		if len(summary.Facts) > 0 {
+			_, upsertErr := m.UpsertTopicMemoryCandidate(ctx, TopicMemoryCandidateInput{
+				GroupID:      topic.GroupID,
+				TopicID:      topic.ID,
+				SelfID:       config.Get().Persona.QQ,
+				Claims:       summary.Facts,
+				LegacyType:   MemoryTypeGroupFact,
+				Participants: participants,
+			})
+			if upsertErr != nil {
+				zap.L().Warn("话题事实下沉长期记忆失败", zap.Uint("topic_id", topic.ID), zap.Error(upsertErr))
+			}
+		}
+		if len(summary.OpenLoops) > 0 {
+			_, upsertErr := m.UpsertTopicMemoryCandidate(ctx, TopicMemoryCandidateInput{
+				GroupID:               topic.GroupID,
+				TopicID:               topic.ID,
+				SelfID:                config.Get().Persona.QQ,
+				Claims:                summary.OpenLoops,
+				LegacyType:            MemoryTypeGroupFact,
+				Participants:          participants,
+				AllowedCanonicalTypes: []CanonicalMemoryType{CanonicalMemoryTypeGoal},
+			})
+			if upsertErr != nil {
+				zap.L().Warn("话题待办下沉长期目标失败", zap.Uint("topic_id", topic.ID), zap.Error(upsertErr))
+			}
+		}
 	}
 
 	if err := m.SyncTopicThreadVector(ctx, topicID); err != nil {

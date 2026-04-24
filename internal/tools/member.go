@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"strings"
 
 	mutils "mumu-bot/internal/utils"
 
@@ -35,25 +36,25 @@ type UpdateMemberProfileOutput struct {
 
 // updateMemberProfileFunc 更新成员画像的实际实现
 func updateMemberProfileFunc(ctx context.Context, input *UpdateMemberProfileInput) (*UpdateMemberProfileOutput, error) {
-	tc := GetToolContext(ctx)
-	if tc == nil {
-		return &UpdateMemberProfileOutput{Success: false, Message: "工具上下文未初始化"}, nil
+	lc := GetLearningContext(ctx)
+	if lc == nil || lc.MemMgr == nil {
+		return &UpdateMemberProfileOutput{Success: false, Message: "当前阶段不能直接改写成员画像"}, nil
 	}
 
 	if input.UserID == 0 {
 		return &UpdateMemberProfileOutput{Success: false, Message: "用户 ID 不能为空"}, nil
 	}
 
-	profile, err := tc.MemoryMgr.GetMemberProfile(input.UserID)
+	profile, err := lc.MemMgr.GetMemberProfile(input.UserID)
 	if err != nil {
-		profile, err = tc.MemoryMgr.GetOrCreateMemberProfile(input.UserID, "")
+		profile, err = lc.MemMgr.GetOrCreateMemberProfile(input.UserID, "")
 		if err != nil {
 			return &UpdateMemberProfileOutput{Success: false, Message: err.Error()}, nil
 		}
 	}
 
-	if input.SpeakStyle != "" {
-		profile.SpeakStyle = input.SpeakStyle
+	if text := strings.TrimSpace(input.SpeakStyle); text != "" {
+		profile.SpeakStyle = text
 	}
 	if input.Interests != nil {
 		b, _ := sonic.MarshalString(input.Interests)
@@ -67,7 +68,7 @@ func updateMemberProfileFunc(ctx context.Context, input *UpdateMemberProfileInpu
 	delta := input.IntimacyDelta
 	profile.Intimacy = mutils.ClampFloat64(profile.Intimacy+delta, 0, 1)
 
-	if err := tc.MemoryMgr.UpdateMemberProfile(profile); err != nil {
+	if err := lc.MemMgr.UpdateMemberProfileLearned(profile); err != nil {
 		return &UpdateMemberProfileOutput{Success: false, Message: err.Error()}, nil
 	}
 
