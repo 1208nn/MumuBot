@@ -712,7 +712,7 @@ func (tm *TopicManager) collectCandidatesLocked(ctx context.Context, groupID int
 			TopicID:            topic.ID,
 			Status:             topic.Status,
 			ReplyMatched:       replyTopicID != 0 && replyTopicID == topic.ID,
-			SemanticScore:      maxFloat(topicSemanticSimilarity(query, topic, state), 0.15),
+			SemanticScore:      max(topicSemanticSimilarity(query, topic, state), 0.15),
 			ParticipantOverlap: topicParticipantOverlap(msg, topic, state),
 			KeywordContinuity:  topicKeywordContinuity(query, topic),
 			LastMessageLogID:   topic.LastMessageLogID,
@@ -734,7 +734,7 @@ func (tm *TopicManager) collectCandidatesLocked(ctx context.Context, groupID int
 				TopicID:            hit.Topic.ID,
 				Status:             hit.Topic.Status,
 				ReplyMatched:       replyTopicID != 0 && replyTopicID == hit.Topic.ID,
-				SemanticScore:      maxFloat(hit.Score, topicKeywordContinuity(query, hit.Topic)),
+				SemanticScore:      max(hit.Score, topicKeywordContinuity(query, hit.Topic)),
 				ParticipantOverlap: topicParticipantOverlap(msg, hit.Topic, archivedState),
 				KeywordContinuity:  topicKeywordContinuity(query, hit.Topic),
 				LastMessageLogID:   hit.Topic.LastMessageLogID,
@@ -1166,7 +1166,7 @@ func topicSemanticSimilarity(query string, topic memory.TopicThread, state *topi
 	if state != nil {
 		tailText = renderTopicTailLines(state.tail, memory.TopicTailKeepMessages)
 	}
-	return maxFloat(textSimilarity(query, summaryText), textSimilarity(query, tailText))
+	return max(textSimilarity(query, summaryText), textSimilarity(query, tailText))
 }
 
 func topicParticipantOverlap(msg *onebot.GroupMessage, topic memory.TopicThread, state *topicRuntimeState) float64 {
@@ -1284,11 +1284,4 @@ func uniqueTopicIDs(ids []uint) []uint {
 		result = append(result, id)
 	}
 	return result
-}
-
-func maxFloat(left, right float64) float64 {
-	if left > right {
-		return left
-	}
-	return right
 }
