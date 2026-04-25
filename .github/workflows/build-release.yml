@@ -102,6 +102,9 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
       - name: Download Artifacts
         uses: actions/download-artifact@v7
         with:
@@ -111,10 +114,61 @@ jobs:
       - name: Display structure of downloaded files
         run: ls -R artifacts
 
+      - name: Build release notes from CHANGELOG.md
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          extract_section() {
+            local file="$1"
+            local version="$2"
+
+            awk -v version="$version" '
+              BEGIN {
+                capture = 0
+                found = 0
+              }
+
+              /^##[[:space:]]+\[/ {
+                if (capture) {
+                  exit
+                }
+                if ($0 ~ ("^##[[:space:]]+\\[v?" version "\\]([[:space:]]+-|[[:space:]]*$)")) {
+                  capture = 1
+                  found = 1
+                }
+              }
+
+              capture && /^\[[^]]+\]:[[:space:]]+/ {
+                exit
+              }
+
+              capture {
+                print
+              }
+
+              END {
+                if (!found) {
+                  exit 2
+                }
+              }
+            ' "$file"
+          }
+
+          if ! release_notes="$(extract_section CHANGELOG.md "$VERSION")"; then
+            echo "Missing changelog section for ${GITHUB_REF_NAME} in CHANGELOG.md"
+            echo "Add a section like: ## [${VERSION}] - YYYY-MM-DD"
+            exit 1
+          fi
+
+          printf '%s\n' "$release_notes" > release-notes.md
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
-          generate_release_notes: true
+          body_path: release-notes.md
           draft: false
           prerelease: false

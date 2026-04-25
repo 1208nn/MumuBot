@@ -26,6 +26,14 @@
 - 修改前端资源后，必须运行 `npm run build`。
 - `internal/web/assets/dist/` 是构建产物，不手工修改，不纳入版本控制。
 
+## 更新日志与发布
+
+- 根目录 `CHANGELOG.md` 是 GitHub Release 的发布说明来源。
+- 更新日志遵循 Keep a Changelog 1.1.0 风格：保留 `Unreleased` 区块，版本按倒序排列，变更类型使用 `Added`、`Changed`、`Deprecated`、`Removed`、`Fixed`、`Security`。
+- 每次完成会进入仓库的代码、配置、文档或工作流改动时，交付前必须同步更新 `CHANGELOG.md`。
+- 更新日志面向使用者和维护者，描述影响和结果，不堆砌 git 提交，不写内部实现流水账。
+- 发布新版本前，必须把 `Unreleased` 中待发布的内容移动到 `## [x.y.z] - YYYY-MM-DD` 版本区块；tag 使用 `vx.y.z`，并确保版本区块存在，否则发布流程会失败。
+
 ## 验证
 
 - 涉及后台 UI 的改动，交付前必须做实际页面验证，优先使用 Chrome DevTools MCP 逐页检查布局、交互、控制台和网络请求。
