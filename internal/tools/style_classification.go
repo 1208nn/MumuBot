@@ -12,56 +12,58 @@ import (
 	"mumu-bot/internal/memory"
 )
 
-// StyleClassification 保存群聊风格分类结果。
-type StyleClassification struct {
-	Intent string `json:"intent"`
-	Tone   string `json:"tone"`
+// ContextClassification 保存回复前上下文分类结果。
+type ContextClassification struct {
+	Intent     string `json:"intent"`
+	Tone       string `json:"tone"`
+	TopicQuery string `json:"topic_query"`
 }
 
-type styleClassificationInput struct {
-	Intent string `json:"intent" jsonschema:"enum=轻松起哄,enum=认同接话,enum=询问推进,enum=安抚缓和,description=当前聊天更适合参考的意图标签"`
-	Tone   string `json:"tone" jsonschema:"enum=直接,enum=轻松,enum=夸张,enum=克制,description=当前聊天更适合参考的语气标签"`
+type contextClassificationInput struct {
+	Intent     string `json:"intent" jsonschema:"enum=轻松起哄,enum=认同接话,enum=询问推进,enum=安抚缓和,description=当前聊天更适合参考的发言方向"`
+	Tone       string `json:"tone" jsonschema:"enum=直接,enum=轻松,enum=夸张,enum=克制,description=当前聊天更适合参考的语气标签"`
+	TopicQuery string `json:"topic_query" jsonschema:"description=用于检索历史话题和长期记忆的短查询；低信息量或不需要检索时留空"`
 }
 
-type styleClassificationOutput struct {
+type contextClassificationOutput struct {
 	Success bool `json:"success"`
 }
 
-type styleClassificationCaptureKey struct{}
+type contextClassificationCaptureKey struct{}
 
-const StyleClassificationToolName = "submitStyleClassification"
+const ContextClassificationToolName = "submitContextClassification"
 
-func WithStyleClassificationTarget(ctx context.Context, target *StyleClassification) context.Context {
-	return context.WithValue(ctx, styleClassificationCaptureKey{}, target)
+func WithContextClassificationTarget(ctx context.Context, target *ContextClassification) context.Context {
+	return context.WithValue(ctx, contextClassificationCaptureKey{}, target)
 }
 
-func getStyleClassificationTarget(ctx context.Context) *StyleClassification {
-	target, _ := ctx.Value(styleClassificationCaptureKey{}).(*StyleClassification)
+func getContextClassificationTarget(ctx context.Context) *ContextClassification {
+	target, _ := ctx.Value(contextClassificationCaptureKey{}).(*ContextClassification)
 	return target
 }
 
-func NewStyleClassificationTool() (tool.InvokableTool, error) {
+func NewContextClassificationTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
-		StyleClassificationToolName,
-		"提交当前聊天上下文的群聊风格分类结果。必须调用一次，并且只提交最合适的 intent 和 tone 标签。",
-		func(ctx context.Context, input *styleClassificationInput) (*styleClassificationOutput, error) {
-			target := getStyleClassificationTarget(ctx)
+		ContextClassificationToolName,
+		"提交当前聊天上下文分类结果。必须调用一次，并且只提交 intent、tone、topic_query。",
+		func(ctx context.Context, input *contextClassificationInput) (*contextClassificationOutput, error) {
+			target := getContextClassificationTarget(ctx)
 			if target == nil {
 				return nil, fmt.Errorf("分类结果接收器未初始化")
 			}
 
 			input.Intent = strings.TrimSpace(input.Intent)
 			input.Tone = strings.TrimSpace(input.Tone)
+			input.TopicQuery = strings.TrimSpace(input.TopicQuery)
 			if !memory.IsValidStyleIntent(input.Intent) || !memory.IsValidStyleTone(input.Tone) {
 				return nil, fmt.Errorf("非法的分类标签")
 			}
 
 			target.Intent = input.Intent
 			target.Tone = input.Tone
-			if err := react.SetReturnDirectly(ctx); err != nil {
-				return nil, err
-			}
-			return &styleClassificationOutput{Success: true}, nil
+			target.TopicQuery = input.TopicQuery
+			_ = react.SetReturnDirectly(ctx)
+			return &contextClassificationOutput{Success: true}, nil
 		},
 	)
 }

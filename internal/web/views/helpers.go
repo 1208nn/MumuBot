@@ -473,10 +473,6 @@ func memberDisplayName(value string) string {
 	return displayText(value, "未填写昵称")
 }
 
-func memberFieldText(value string, fallback string) string {
-	return displayText(value, fallback)
-}
-
 func memberTags(raw string, limit int) []string {
 	items := normalizedListItems(raw)
 	if limit > 0 && len(items) > limit {

@@ -6,10 +6,6 @@ import (
 	"mumu-bot/internal/memory"
 )
 
-const (
-	topicReuseThreshold = 0.75
-)
-
 type topicCandidate struct {
 	TopicID            uint
 	Status             memory.TopicThreadStatus
@@ -18,61 +14,6 @@ type topicCandidate struct {
 	ParticipantOverlap float64
 	KeywordContinuity  float64
 	LastMessageLogID   uint
-}
-
-type topicDecision struct {
-	TopicID       uint
-	SlotAction    memory.TopicSlotAction
-	VictimTopicID uint
-}
-
-func chooseTopicDecision(candidates []topicCandidate, activeTopics []memory.TopicThread, reuseThreshold float64, maxActive int) topicDecision {
-	if maxActive <= 0 {
-		maxActive = memory.MaxActiveTopicThreadsPerGroup
-	}
-
-	sortedCandidates := sortTopicCandidates(candidates)
-	var (
-		best topicCandidate
-		ok   bool
-	)
-	for _, candidate := range sortedCandidates {
-		score := scoreTopicCandidate(candidate)
-		if candidate.ReplyMatched || score >= reuseThreshold {
-			best = candidate
-			ok = true
-			break
-		}
-	}
-	if !ok {
-		if len(activeTopics) >= maxActive {
-			return topicDecision{
-				SlotAction:    memory.TopicSlotActionCreate,
-				VictimTopicID: memory.OldestActiveTopicID(activeTopics),
-			}
-		}
-		return topicDecision{SlotAction: memory.TopicSlotActionCreate}
-	}
-
-	if best.Status == memory.TopicThreadStatusActive {
-		return topicDecision{
-			TopicID:    best.TopicID,
-			SlotAction: memory.TopicSlotActionReuse,
-		}
-	}
-
-	if len(activeTopics) >= maxActive {
-		return topicDecision{
-			TopicID:       best.TopicID,
-			SlotAction:    memory.TopicSlotActionReopen,
-			VictimTopicID: memory.OldestActiveTopicID(activeTopics),
-		}
-	}
-
-	return topicDecision{
-		TopicID:    best.TopicID,
-		SlotAction: memory.TopicSlotActionReopen,
-	}
 }
 
 func sortTopicCandidates(candidates []topicCandidate) []topicCandidate {

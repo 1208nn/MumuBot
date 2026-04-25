@@ -95,15 +95,11 @@ func (m Memory) EffectiveStatus() MemoryStatus {
 
 func (m Memory) RecallEligible() bool {
 	switch m.EffectiveStatus() {
-	case MemoryStatusActive:
+	case MemoryStatusActive, MemoryStatusLegacy:
 		return true
 	default:
 		return false
 	}
-}
-
-func (m Memory) LegacyRecallEligible() bool {
-	return m.EffectiveStatus() == MemoryStatusLegacy
 }
 
 func IsKeyedCanonicalType(kind CanonicalMemoryType) bool {
@@ -360,7 +356,7 @@ type MessageLog struct {
 	IsMentioned      bool    `gorm:"default:false" json:"is_mentioned"`
 	Forwards         string  `gorm:"type:text" json:"forwards,omitempty"` // 合并转发内容的 JSON
 	TopicThreadID    uint    `gorm:"index;default:0" json:"topic_thread_id"`
-	TopicMatchReason string  `gorm:"type:varchar(50)" json:"topic_match_reason,omitempty"`
+	TopicMatchReason string  `gorm:"type:varchar(255)" json:"topic_match_reason,omitempty"`
 	TopicMatchScore  float64 `gorm:"default:0" json:"topic_match_score"`
 }
 
@@ -457,7 +453,7 @@ type LearningState struct {
 	UpdatedAt time.Time `json:"updated_at"`
 
 	GroupID       int64 `gorm:"uniqueIndex" json:"group_id"`
-	LastMessageID uint  `json:"last_message_id"` // 上次学习到的最后一条消息ID (数据库自增ID)
+	LastMessageID uint  `json:"last_message_id"` // learner 已处理到的最后一条消息ID (数据库自增ID)
 }
 
 func (LearningState) TableName() string { return "learning_states" }

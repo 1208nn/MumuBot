@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func styleClassificationMessageWindowSize(bufferSize int) int {
+func contextClassificationMessageWindowSize(bufferSize int) int {
 	if bufferSize <= 0 {
 		cfg := config.Get()
 		if cfg != nil {
@@ -26,8 +26,8 @@ func styleClassificationMessageWindowSize(bufferSize int) int {
 	return window
 }
 
-func trimStyleClassificationMessages(msgs []*onebot.GroupMessage, bufferSize int) []*onebot.GroupMessage {
-	window := styleClassificationMessageWindowSize(bufferSize)
+func trimContextClassificationMessages(msgs []*onebot.GroupMessage, bufferSize int) []*onebot.GroupMessage {
+	window := contextClassificationMessageWindowSize(bufferSize)
 	if len(msgs) <= window {
 		return msgs
 	}

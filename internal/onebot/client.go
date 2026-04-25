@@ -533,16 +533,12 @@ func (c *Client) parseMessageSegments(event map[string]interface{}, msg *GroupMe
 			msg.Faces = append(msg.Faces, face)
 
 		case "at":
-			if qq, ok := data["qq"].(string); ok {
-				if qq == "all" {
-					textParts = append(textParts, "@全体成员")
-				} else if qqID, err := strconv.ParseInt(qq, 10, 64); err == nil {
-					msg.AtList = append(msg.AtList, qqID)
-					textParts = append(textParts, "@"+qq)
-				}
-			} else if qqID, ok := utils.ParseInt64Value(data["qq"]); ok {
+			text, qqID, ok := parseAtSegment(data)
+			if ok {
 				msg.AtList = append(msg.AtList, qqID)
-				textParts = append(textParts, fmt.Sprintf("@%d", qqID))
+			}
+			if text != "" {
+				textParts = append(textParts, text)
 			}
 
 		case "reply":
@@ -1261,14 +1257,8 @@ func extractTextFromSegments(segments []interface{}) string {
 		case "file":
 			parts = append(parts, "[文件]")
 		case "at":
-			if qq, ok := data["qq"].(string); ok {
-				if qq == "all" {
-					parts = append(parts, "@全体成员")
-				} else {
-					parts = append(parts, "@"+qq)
-				}
-			} else if qqID, ok := utils.ParseInt64Value(data["qq"]); ok {
-				parts = append(parts, fmt.Sprintf("@%d", qqID))
+			if text, _, _ := parseAtSegment(data); text != "" {
+				parts = append(parts, text)
 			}
 		case "json":
 			parts = append(parts, "[卡片消息]")
@@ -1277,6 +1267,39 @@ func extractTextFromSegments(segments []interface{}) string {
 		}
 	}
 	return strings.Join(parts, "")
+}
+
+func atDisplayName(data map[string]interface{}) string {
+	for _, key := range []string{"name", "nickname", "card"} {
+		if value, ok := data[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func parseAtSegment(data map[string]interface{}) (string, int64, bool) {
+	if qq, ok := data["qq"].(string); ok {
+		if qq == "all" {
+			return "@全体成员", 0, false
+		}
+		qqID, err := strconv.ParseInt(qq, 10, 64)
+		if err != nil {
+			return "", 0, false
+		}
+		if displayName := atDisplayName(data); displayName != "" {
+			return "@" + displayName, qqID, true
+		}
+		return "@" + qq, qqID, true
+	}
+	qqID, ok := utils.ParseInt64Value(data["qq"])
+	if !ok {
+		return "", 0, false
+	}
+	if displayName := atDisplayName(data); displayName != "" {
+		return "@" + displayName, qqID, true
+	}
+	return fmt.Sprintf("@%d", qqID), qqID, true
 }
 
 // GetMessageReactions 获取消息的表情回应

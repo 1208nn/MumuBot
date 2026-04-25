@@ -253,14 +253,14 @@ func (l *Learner) processGroup(groupID int64) {
 		return
 	}
 
-	// Fetch messages after last learned ID (limit batchSize)
+	// 只读取 learner 连续可消费的“已处理前缀”
 	cfg := config.Get()
 	batchSize := cfg.Learning.BatchSize
 	if batchSize <= 0 {
 		batchSize = 100
 	}
 
-	msgs, err := l.memMgr.GetMessagesAfterID(groupID, cfg.Persona.QQ, state.LastMessageID, batchSize)
+	msgs, err := l.memMgr.GetProcessableLearningMessages(groupID, cfg.Persona.QQ, state.LastMessageID, batchSize)
 	if err != nil {
 		zap.L().Error("获取消息失败", zap.Int64("group_id", groupID), zap.Error(err))
 		return
@@ -270,23 +270,30 @@ func (l *Learner) processGroup(groupID int64) {
 		return
 	}
 
-	// 记录本批次最新的消息ID，用于更新进度
-	newLastID := state.LastMessageID
-	if len(msgs) > 0 {
-		newLastID = msgs[len(msgs)-1].ID
+	learnableMsgs, newLastID, firstLearnableIndex := selectLearnableMessages(msgs)
+
+	if len(learnableMsgs) == 0 {
+		if err := l.memMgr.UpdateLearningState(groupID, newLastID); err != nil {
+			zap.L().Error("更新学习进度失败", zap.Int64("group_id", groupID), zap.Error(err))
+		}
+		return
 	}
 
 	minMsgCount := cfg.Learning.MinMsgCount
 	if minMsgCount <= 0 {
 		minMsgCount = 5
 	}
-	if len(msgs) < minMsgCount {
-		// 消息太少，直接跳过，也不更新进度，等待积累更多
+	if len(learnableMsgs) < minMsgCount {
+		if firstLearnableIndex > 0 {
+			if err := l.memMgr.UpdateLearningState(groupID, msgs[firstLearnableIndex-1].ID); err != nil {
+				zap.L().Error("更新学习进度失败", zap.Int64("group_id", groupID), zap.Error(err))
+			}
+		}
 		return
 	}
 
-	knowledgeErr := l.processKnowledgeExtraction(groupID, msgs)
-	memberErr := l.processMemberProfileExtraction(groupID, msgs)
+	knowledgeErr := l.processKnowledgeExtraction(groupID, learnableMsgs)
+	memberErr := l.processMemberProfileExtraction(groupID, learnableMsgs)
 	if knowledgeErr != nil || memberErr != nil {
 		if knowledgeErr != nil {
 			zap.L().Error("后台学习任务失败", zap.Int64("group_id", groupID), zap.Error(knowledgeErr))
@@ -491,6 +498,24 @@ func (l *Learner) buildMemberProfileSummaries(msgs []memory.MessageLog) []string
 	}
 
 	return summaries
+}
+
+func selectLearnableMessages(msgs []memory.MessageLog) ([]memory.MessageLog, uint, int) {
+	if len(msgs) == 0 {
+		return nil, 0, -1
+	}
+	learnable := make([]memory.MessageLog, 0, len(msgs))
+	lastID := msgs[len(msgs)-1].ID
+	firstLearnableIndex := -1
+	for idx, msg := range msgs {
+		if memory.IsTopicAssignmentProcessed(msg) {
+			if firstLearnableIndex < 0 {
+				firstLearnableIndex = idx
+			}
+			learnable = append(learnable, msg)
+		}
+	}
+	return learnable, lastID, firstLearnableIndex
 }
 
 func decodeProfileList(raw string) []string {

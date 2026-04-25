@@ -59,15 +59,6 @@ var slotKindsByType = map[CanonicalMemoryType]map[string]struct{}{
 	},
 }
 
-func fallbackCanonicalTypeFromLegacy(legacyType MemoryType) CanonicalMemoryType {
-	switch legacyType {
-	case MemoryTypeSelfExperience:
-		return CanonicalMemoryTypeEpisode
-	default:
-		return CanonicalMemoryTypeFact
-	}
-}
-
 func normalizeCanonicalType(raw string) CanonicalMemoryType {
 	switch CanonicalMemoryType(strings.TrimSpace(strings.ToLower(raw))) {
 	case CanonicalMemoryTypeFact,
@@ -96,46 +87,18 @@ func normalizeSlotKind(kind CanonicalMemoryType, raw string) string {
 	return ""
 }
 
-func normalizeSubjectClass(hint string, input MemoryIngestInput, canonicalType CanonicalMemoryType) MemorySubjectClass {
+func normalizeSubjectClass(hint string) MemorySubjectClass {
 	switch MemorySubjectClass(strings.TrimSpace(strings.ToLower(hint))) {
 	case MemorySubjectClassGroup:
-		if input.GroupID > 0 {
-			return MemorySubjectClassGroup
-		}
+		return MemorySubjectClassGroup
 	case MemorySubjectClassSelf:
-		if input.SelfID > 0 {
-			return MemorySubjectClassSelf
-		}
+		return MemorySubjectClassSelf
 	case MemorySubjectClassMember:
-		if input.RelatedUserID > 0 {
-			if input.SelfID > 0 && input.RelatedUserID == input.SelfID {
-				return MemorySubjectClassSelf
-			}
-			return MemorySubjectClassMember
-		}
-	}
-
-	if input.RelatedUserID > 0 {
-		if input.SelfID > 0 && input.RelatedUserID == input.SelfID {
-			return MemorySubjectClassSelf
-		}
 		return MemorySubjectClassMember
+	case MemorySubjectClassUnknown:
+		return MemorySubjectClassUnknown
 	}
-
-	if input.SourceKind == MemorySourceKindMigration {
-		switch input.LegacyTypeHint {
-		case MemoryTypeSelfExperience:
-			if input.SelfID > 0 {
-				return MemorySubjectClassSelf
-			}
-		case MemoryTypeGroupFact:
-			if input.GroupID > 0 && canonicalType != CanonicalMemoryTypeEpisode {
-				return MemorySubjectClassGroup
-			}
-		}
-	}
-
-	return MemorySubjectClassUnknown
+	return ""
 }
 
 func withMemoryClaimTarget(ctx context.Context, target *rawNormalizedClaim) context.Context {
@@ -194,7 +157,7 @@ func newMemoryClaimTool() (tool.InvokableTool, error) {
 
 func newMemoryClaimExtractor(claimModel model.ToolCallingChatModel) (*agentreact.Agent, error) {
 	if claimModel == nil {
-		return nil, nil
+		return nil, fmt.Errorf("claimModel 不能为空")
 	}
 
 	claimTool, err := newMemoryClaimTool()
@@ -218,10 +181,7 @@ func newMemoryClaimExtractor(claimModel model.ToolCallingChatModel) (*agentreact
 }
 
 func (m *Manager) extractNormalizedClaim(ctx context.Context, input MemoryIngestInput, content string) NormalizedClaim {
-	if claim := m.extractNormalizedClaimWithTool(ctx, input, content); claim.CanonicalType != "" {
-		return claim
-	}
-	return m.extractNormalizedClaimFallback(input, content)
+	return m.extractNormalizedClaimWithTool(ctx, input, content)
 }
 
 func (m *Manager) extractNormalizedClaimWithTool(ctx context.Context, input MemoryIngestInput, content string) NormalizedClaim {
@@ -256,7 +216,9 @@ func (m *Manager) extractNormalizedClaimWithTool(ctx context.Context, input Memo
 
 规则：
 - subject_class 只能是 group | self | member | unknown
-- 如果 subject_class=member，subject_name 只能从候选成员里挑一个昵称；无法确定就把 subject_class 设为 unknown
+- 如果 subject_class=member，且提供了 subject_candidates，subject_name 只能从候选成员里挑一个昵称；无法确定就把 subject_class 设为 unknown
+- 如果 related_user_id > 0 且不等于 self_id，它表示外部已经明确指定了某个 member 主体；这种情况下 subject_class 可以是 member，subject_name 允许留空
+- 如果 related_user_id > 0 且等于 self_id，它表示外部已经明确指定了 self 主体；这种情况下 subject_class 应该是 self
 - canonical_type 只能是 fact | episode | preference | constraint | goal | ignore
 - keyed 类型必须填写合法 slot_kind：
   - fact: identity | relation | role | status | assignment | schedule | conclusion
@@ -273,15 +235,15 @@ func (m *Manager) extractNormalizedClaimWithTool(ctx context.Context, input Memo
 - source_kind: %s
 - related_user_id: %d
 - self_id: %d
-- legacy_type_hint: %s
 - subject_candidates: %s
+- allowed_canonical_types: %s
 - content: %s`,
 		memoryClaimToolName,
 		input.SourceKind,
 		input.RelatedUserID,
 		input.SelfID,
-		input.LegacyTypeHint,
 		subjectCandidates,
+		allowedCanonicalTypesPrompt(input.AllowedCanonicalTypes),
 		content,
 	)
 
@@ -296,11 +258,18 @@ func (m *Manager) extractNormalizedClaimWithTool(ctx context.Context, input Memo
 		schema.UserMessage(prompt),
 	}, options...)
 	if err != nil {
-		zap.L().Warn("结构化提取长期记忆失败，回退到保守规则", zap.Error(err))
+		zap.L().Warn("结构化提取长期记忆失败", zap.Error(err))
 		return NormalizedClaim{}
 	}
-
-	return buildNormalizedClaim(input, *target)
+	claim := buildNormalizedClaim(input, *target)
+	if claim.CanonicalType == "" {
+		zap.L().Warn("结构化提取长期记忆返回无效 claim",
+			zap.String("subject_class", target.SubjectClass),
+			zap.String("subject_name", target.SubjectName),
+			zap.String("canonical_type", target.CanonicalType),
+			zap.String("slot_kind", target.SlotKind))
+	}
+	return claim
 }
 
 func buildNormalizedClaim(input MemoryIngestInput, raw rawNormalizedClaim) NormalizedClaim {
@@ -313,13 +282,36 @@ func buildNormalizedClaim(input MemoryIngestInput, raw rawNormalizedClaim) Norma
 	if claim.CanonicalType == "" {
 		return NormalizedClaim{}
 	}
-
-	resolvedInput := input
-	if resolvedInput.RelatedUserID == 0 {
-		resolvedInput.RelatedUserID = resolveSubjectCandidateUserID(raw.SubjectName, input.SubjectCandidates)
+	claim.SubjectClass = normalizeSubjectClass(raw.SubjectClass)
+	if claim.SubjectClass == "" {
+		return NormalizedClaim{}
 	}
 
-	claim.SubjectClass = normalizeSubjectClass(raw.SubjectClass, resolvedInput, claim.CanonicalType)
+	switch claim.SubjectClass {
+	case MemorySubjectClassGroup:
+		if input.GroupID <= 0 {
+			return NormalizedClaim{}
+		}
+	case MemorySubjectClassSelf:
+		if input.SelfID <= 0 {
+			return NormalizedClaim{}
+		}
+		if input.RelatedUserID > 0 && input.RelatedUserID != input.SelfID {
+			return NormalizedClaim{}
+		}
+	case MemorySubjectClassMember:
+		if input.RelatedUserID > 0 {
+			if input.SelfID > 0 && input.RelatedUserID == input.SelfID {
+				return NormalizedClaim{}
+			}
+		} else if resolveSubjectCandidateUserID(raw.SubjectName, input.SubjectCandidates) == 0 {
+			return NormalizedClaim{}
+		}
+	case MemorySubjectClassUnknown:
+	default:
+		return NormalizedClaim{}
+	}
+
 	if IsKeyedCanonicalType(claim.CanonicalType) {
 		claim.SlotKind = normalizeSlotKind(claim.CanonicalType, raw.SlotKind)
 		if claim.SlotKind == "" {
@@ -353,47 +345,21 @@ func resolveSubjectCandidateUserID(subjectName string, candidates []TopicPartici
 	return matched
 }
 
-func (m *Manager) extractNormalizedClaimFallback(input MemoryIngestInput, content string) NormalizedClaim {
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return NormalizedClaim{}
+func allowedCanonicalTypesPrompt(allowed []CanonicalMemoryType) string {
+	if len(allowed) == 0 {
+		return "fact | episode | preference | constraint | goal | ignore"
 	}
-
-	canonicalType := fallbackCanonicalTypeFromLegacy(input.LegacyTypeHint)
-	if input.SourceKind != MemorySourceKindMigration {
-		canonicalType = CanonicalMemoryTypeFact
-		resolvedInput := input
-		if resolvedInput.RelatedUserID == 0 {
-			resolvedInput.RelatedUserID = resolveSubjectCandidateUserID("", input.SubjectCandidates)
+	parts := make([]string, 0, len(allowed)+1)
+	for _, item := range allowed {
+		item = CanonicalMemoryType(strings.TrimSpace(string(item)))
+		if item == "" {
+			continue
 		}
-		if normalizeSubjectClass("", resolvedInput, canonicalType) == MemorySubjectClassSelf && input.SourceKind == MemorySourceKindMessage {
-			canonicalType = CanonicalMemoryTypeEpisode
-		}
+		parts = append(parts, string(item))
 	}
-
-	claim := NormalizedClaim{
-		CanonicalType: canonicalType,
-		SubjectClass:  normalizeSubjectClass("", input, canonicalType),
-		ValueSummary:  content,
-		LongTerm:      canonicalType != CanonicalMemoryTypeGoal,
+	if len(parts) == 0 {
+		return "fact | episode | preference | constraint | goal | ignore"
 	}
-
-	if IsKeyedCanonicalType(canonicalType) {
-		switch canonicalType {
-		case CanonicalMemoryTypePreference:
-			claim.SlotKind = "like"
-		case CanonicalMemoryTypeConstraint:
-			claim.SlotKind = "rule"
-		case CanonicalMemoryTypeGoal:
-			claim.SlotKind = "project"
-		default:
-			claim.SlotKind = "identity"
-		}
-		claim.SlotAnchor = normalizeSlotAnchor(content)
-		if claim.SlotAnchor == "" {
-			return NormalizedClaim{}
-		}
-	}
-
-	return claim
+	parts = append(parts, "ignore")
+	return strings.Join(parts, " | ")
 }

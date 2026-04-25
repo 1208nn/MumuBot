@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cloudwego/eino/components/model"
 	"go.uber.org/zap"
 )
 
@@ -63,12 +62,11 @@ func main() {
 		zap.L().Fatal("Embedding 客户端创建失败", zap.Error(err))
 	}
 
-	claimModel, claimTier, err := newClaimExtractionModel()
+	claimModel, err := llm.NewClientForTier(llm.TierLow)
 	if err != nil {
-		zap.L().Warn("记忆结构化提取模型不可用，将回退到最小保守规则", zap.Error(err))
-	} else if claimModel != nil {
-		zap.L().Info("记忆结构化提取模型已就绪", zap.String("tier", claimTier))
+		zap.L().Fatal("记忆结构化提取模型创建失败", zap.Error(err))
 	}
+	zap.L().Info("记忆结构化提取模型已就绪", zap.String("tier", "low"))
 
 	memoryMgr, err := memory.NewManager(embeddingClient, claimModel)
 	if err != nil {
@@ -130,29 +128,4 @@ func enabledGroups(groups []config.GroupConfig) int {
 		}
 	}
 	return count
-}
-
-func newClaimExtractionModel() (memoryModel model.ToolCallingChatModel, tierName string, err error) {
-	for _, candidate := range []struct {
-		tier llm.Tier
-		name string
-	}{
-		{tier: llm.TierLow, name: "low"},
-		{tier: llm.TierMid, name: "mid"},
-		{tier: llm.TierHigh, name: "high"},
-	} {
-		client, clientErr := llm.NewClientForTier(candidate.tier)
-		if clientErr != nil || client == nil {
-			err = clientErr
-			if clientErr != nil {
-				zap.L().Warn("记忆结构化提取模型降级失败", zap.String("tier", candidate.name), zap.Error(clientErr))
-			}
-			continue
-		}
-		return client, candidate.name, nil
-	}
-	if err == nil {
-		err = fmt.Errorf("no claim extraction model available")
-	}
-	return nil, "", err
 }

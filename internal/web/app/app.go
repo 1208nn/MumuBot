@@ -71,10 +71,6 @@ func New(cfg *config.Config, admin *services.AdminService, runtime RuntimeSource
 	return app
 }
 
-func (a *App) Handler() http.Handler {
-	return a.router
-}
-
 func (a *App) Addr() string {
 	return fmt.Sprintf(":%d", a.cfg.Server.Port)
 }
