@@ -529,7 +529,6 @@ func (a *Agent) onMessage(msg *onebot.GroupMessage) {
 	})
 	if persistErr != nil {
 		zap.L().Error("写入话题工作记忆失败", zap.Int64("group_id", msg.GroupID), zap.Int64("message_id", msg.MessageID), zap.Error(persistErr))
-		return
 	}
 
 	a.addBuffer(msg)
@@ -1106,7 +1105,7 @@ func (a *Agent) think(groupID int64, isMention bool) {
 
 	// 注入黑话/梗的解释（AC自动机匹配）
 	if a.jargonMgr != nil {
-		promptCtx.JargonMatches = a.jargonMgr.Match(chatContext)
+		promptCtx.JargonMatches = a.jargonMgr.Match(collectTextContext(a.getBuffer(groupID)))
 	}
 	promptCtx.StyleHints = a.buildStyleHintContext(ctx, groupID)
 
@@ -1234,9 +1233,6 @@ func (a *Agent) buildMemoryContext(ctx context.Context, groupID int64, query str
 
 	result := make([]memory.Memory, 0, crossLimit)
 	for _, mem := range cross {
-		if crossLimit <= 0 {
-			break
-		}
 		if _, ok := seen[mem.ID]; ok {
 			continue
 		}
@@ -1257,10 +1253,7 @@ func collectTextContext(msgs []*onebot.GroupMessage) string {
 
 	parts := make([]string, 0, len(msgs))
 	for _, msg := range msgs {
-		text := strings.TrimSpace(msg.FinalContent)
-		if text == "" {
-			text = strings.TrimSpace(msg.Content)
-		}
+		text := messageTopicText(msg)
 		if text == "" {
 			continue
 		}

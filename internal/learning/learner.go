@@ -437,9 +437,6 @@ func (l *Learner) buildMemberProfileSummaries(msgs []memory.MessageLog) []string
 		}
 		content := strings.TrimSpace(msg.OriginalContent)
 		if content == "" {
-			content = strings.TrimSpace(msg.Content)
-		}
-		if content == "" {
 			continue
 		}
 

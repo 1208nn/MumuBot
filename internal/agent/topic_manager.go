@@ -800,7 +800,7 @@ func (tm *TopicManager) buildRetrievalQueryLocked(ctx context.Context, groupID i
 	}
 	topic, err := tm.store.GetTopicThread(ctx, topicIDs[0])
 	if err != nil {
-		return messageTopicText(latest)
+		return ""
 	}
 	summary := memory.ParseTopicSummary(topic.SummaryJSON)
 	parts := []string{strings.TrimSpace(summary.Title), strings.TrimSpace(summary.Gist)}
@@ -1014,10 +1014,7 @@ func (tm *TopicManager) generateSummary(ctx context.Context, oldSummary memory.T
 
 	var msgLines []string
 	for _, log := range newMessages {
-		text := strings.TrimSpace(log.Content)
-		if text == "" {
-			text = strings.TrimSpace(log.OriginalContent)
-		}
+		text := messageLogTopicText(log)
 		if text == "" {
 			continue
 		}
@@ -1046,10 +1043,7 @@ func (tm *TopicManager) generateSummary(ctx context.Context, oldSummary memory.T
 
 func messageLogToGroupMessage(log memory.MessageLog) *onebot.GroupMessage {
 	msg := messageLogBaseGroupMessage(log)
-	msg.Content = strings.TrimSpace(log.OriginalContent)
-	if msg.Content == "" {
-		msg.Content = strings.TrimSpace(log.Content)
-	}
+	msg.Content = messageLogTopicText(log)
 	msg.FinalContent = strings.TrimSpace(log.Content)
 	return msg
 }
@@ -1145,10 +1139,7 @@ func renderTopicTailLines(tail []*onebot.GroupMessage, limit int) string {
 	}
 	lines := make([]string, 0, len(tail))
 	for _, msg := range tail {
-		text := strings.TrimSpace(msg.FinalContent)
-		if text == "" {
-			text = strings.TrimSpace(msg.Content)
-		}
+		text := messageTopicText(msg)
 		if text == "" {
 			continue
 		}
@@ -1161,11 +1152,11 @@ func messageTopicText(msg *onebot.GroupMessage) string {
 	if msg == nil {
 		return ""
 	}
-	text := strings.TrimSpace(msg.FinalContent)
-	if text == "" {
-		text = strings.TrimSpace(msg.Content)
-	}
-	return text
+	return strings.TrimSpace(msg.Content)
+}
+
+func messageLogTopicText(log memory.MessageLog) string {
+	return strings.TrimSpace(log.OriginalContent)
 }
 
 func topicSemanticSimilarity(query string, topic memory.TopicThread, state *topicRuntimeState) float64 {
