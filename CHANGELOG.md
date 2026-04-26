@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-04-27
+
 ### 变更
 
 - **协作约束现已补充核心架构边界**：`AGENTS.md` 新增话题主路径、学习系统职责、原始文本语义边界、“宁缺毋滥”质量取向与消息保留规则，后续协作默认按这些约束执行。
@@ -62,6 +64,7 @@
 
 - **后台 Toast 样式现已恢复正常**：修复提示信息显示异常的问题。
 
-[Unreleased]: https://github.com/SugarMGP/MumuBot/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/SugarMGP/MumuBot/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/SugarMGP/MumuBot/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/SugarMGP/MumuBot/compare/v1.2.4...v1.3.0
 [1.2.4]: https://github.com/SugarMGP/MumuBot/releases/tag/v1.2.4
